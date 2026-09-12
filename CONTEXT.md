@@ -160,19 +160,27 @@ It has NOT been run yet — see Open items below.
   order-of-magnitude guess here would violate the BUILD INSTRUCTION's
   "no fake/invented numbers, ever" rule.
 
+- D11 — 2026-09-12 — **Leon's decision: the real ~37.56 GiB / 5-year CMS
+  pull waits for Gate 1** (asked directly in chat after the W-B1 report;
+  options were "run it now", "run one year first", or "wait until Gate
+  1" — Leon chose the third). Reason given by the option itself: once
+  S3/Neon credentials exist, the real data can go straight into
+  permanent storage instead of sitting on his Mac first. This replaces
+  the earlier "needs Leon's go-ahead" open item below with a settled
+  plan — no pull runs until Gate 1 is reached, at which point it needs
+  its own confirmation to start (not an automatic trigger).
+
 ## Open items (blocked on Leon)
 
-- **The real ~37.56 GiB / 5-year pull has not been run.** It can only run
-  from a machine with real network access to `openpaymentsdata.cms.gov` /
-  `download.cms.gov` (this build environment's sandboxes are both
-  blocked — see "Network egress" above), so realistically that means
-  Leon's own Mac, for multiple hours, using real bandwidth and disk
-  space (peaking at ~9.2 GB for the largest single year's raw CSV
-  in flight, streamed and never fully buffered, though the OS/network
-  stack still moves that many bytes across the wire). This needs an
-  explicit go-ahead separate from the general "GO: WB-1" already given,
-  because of that real resource cost on a personal, possibly-unattended
-  machine — see the chat message asking this directly.
+- **The real ~37.56 GiB / 5-year pull is deferred to Gate 1 (D11).** It
+  can only run from a machine with real network access to
+  `openpaymentsdata.cms.gov` / `download.cms.gov` (this build
+  environment's sandboxes are both blocked — see "Network egress"
+  above), so realistically that means Leon's own Mac, for multiple
+  hours, using real bandwidth and disk space (peaking at ~9.2 GB for the
+  largest single year's raw CSV in flight, streamed and never fully
+  buffered). Not blocked on a decision anymore — blocked on reaching
+  Gate 1, then needs a fresh explicit go-ahead to actually start.
 - Until that pull runs: `data/facts.md`'s 5 headline numbers, the
   Methodology tab's "row counts per product per year" (spec §1's
   non-negotiable), and the manufacturer-of-record sanity check (§3.1 —
