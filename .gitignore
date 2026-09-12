@@ -1,0 +1,22 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.DS_Store
+node_modules/
+# raw/<year>/*.jsonl.gz is the pulled, GLP-1-filtered CMS Open Payments data
+# (D1, area/CONTEXT.md): real, large, and fully reproducible by re-running
+# `area pull` against the same public dataset -- not committed, same reason
+# model-bench doesn't commit its built web/index.html. manifest.json (the
+# per-year pull record: dataset id, download URL, row counts, checksums) is
+# NOT ignored -- see the negated pattern below -- since it is small, is the
+# audit trail, and belongs in git even though the data it describes doesn't.
+raw/*/*.jsonl.gz
+raw/*/*.json.gz
+!raw/*/manifest.json

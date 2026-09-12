@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "as_of": "2026-09-12",
+  "description": "The GLP-1 product match list used to filter CMS Open Payments general-payment rows for AREA v0 (SPEC-area.md section 3.1).",
+  "generic_names": [
+    "semaglutide",
+    "tirzepatide"
+  ],
+  "brand_names": [
+    "Ozempic",
+    "Wegovy",
+    "Rybelsus",
+    "Mounjaro",
+    "Zepbound"
+  ],
+  "brand_to_generic": {
+    "Ozempic": "semaglutide",
+    "Wegovy": "semaglutide",
+    "Rybelsus": "semaglutide",
+    "Mounjaro": "tirzepatide",
+    "Zepbound": "tirzepatide"
+  },
+  "match_rule": "Case-insensitive substring match of any generic_names or brand_names term against each POPULATED Open Payments product field, checked in this order for each of the 5 product slots (N = 1..5): Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_N, then (only where present) Product_Category_or_Therapeutic_Area_N. A row matches if any slot matches. The lowest-numbered matching slot is recorded as the row's canonical product/matched_field; every matching slot is kept in the raw pulled record for audit.",
+  "manufacturers_of_record": [
+    "Novo Nordisk",
+    "Eli Lilly"
+  ],
+  "manufacturer_sanity_check": {
+    "description": "Not a filter -- every matched row is kept regardless of paying manufacturer. This is a data-quality check only: the pull script reports the share of matched rows whose Applicable_Manufacturer_or_Applicable_GPO_Making_Payment_Name is neither manufacturer_of_record. Per spec section 3.1, if that share exceeds the threshold below, the pull script lists the top other manufacturers in its manifest and CONTEXT.md is updated with what they are (e.g. a GPO, a distributor, or a generic-name mismatch) rather than silently accepting it.",
+    "threshold_pct": 5
+  }
+}

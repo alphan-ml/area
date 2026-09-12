@@ -1,0 +1,51 @@
+[project]
+name = "area"
+version = "0.1.0"
+description = "AREA — Automated Research Evaluation Assistant. v0: GLP-1 manufacturer payments (CMS Open Payments) research agent."
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    # Deliberately zero required runtime dependencies as of W-B1: the CMS
+    # Open Payments pull (src/area/pull_open_payments.py) uses only the
+    # standard library (urllib.request, gzip, json) so it never needs an
+    # installed package to run against the live public API. psycopg (the
+    # Neon/Postgres driver, for src/area/load_neon.py) is imported lazily,
+    # the same pattern as modelbench's boto3 (see model-bench D10) — it is
+    # only needed once a real DATABASE_URL exists (W-B4), never for the
+    # fixture-based idempotency test this task ships.
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    # Needed starting in W-B1, not only W-B4 as first planned: proving
+    # load_neon.py's upsert-on-record_id idempotency needs a real
+    # ON CONFLICT DO UPDATE against a real database -- a mock can't verify
+    # that. tests/test_load_idempotent.py's DB-backed tests read
+    # TEST_DATABASE_URL and skip cleanly (not silently pass) if it's unset.
+    # load_neon.py itself still imports psycopg lazily at call time (see
+    # its module docstring), so this is a dev/test dependency, not a
+    # runtime one, until W-B4 wires the live Neon database.
+    "psycopg[binary]>=3.1",
+]
+
+[project.scripts]
+area = "area.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
