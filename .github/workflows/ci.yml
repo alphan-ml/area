@@ -1,0 +1,52 @@
+name: CI
+
+# ruff + pytest on every push (SPEC-area.md section 8). A postgres:16
+# service container backs TEST_DATABASE_URL so
+# tests/test_load_idempotent.py's DB-backed tests run for real instead of
+# skipping -- CI is exactly the "postgres:16 service container" case
+# .env.example describes.
+#
+# test_golden_baseline.py (W-B4) is not in this repo yet -- it will need
+# real model-provider secrets to run the golden set live, so per section 8
+# it's marked to run only when evals/latest.json changes or on a schedule,
+# from a GitHub environment with those secrets configured (documented here
+# once W-B4 adds it, not before -- see CONTEXT.md's open items).
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: area_test
+          POSTGRES_PASSWORD: area_test_pw
+          POSTGRES_DB: area_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      TEST_DATABASE_URL: postgresql://area_test:area_test_pw@localhost:5432/area_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install project (with dev extras)
+        run: pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Test (pytest)
+        run: pytest -q
