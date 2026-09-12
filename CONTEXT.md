@@ -200,3 +200,152 @@ code and its tests are ready for the moment the pull is authorized.
 ## Reports
 
 <!-- Each task's report (per the BUILD INSTRUCTION format) is appended below. -->
+
+### TASK: W-B1 — 2026-09-12 19:19 ET (commit timestamp pending — see git log)
+
+TASK: W-B1 — AREA data layer: the GLP-1 product match list and rule
+(`data/products.json`, `src/area/match.py`), a streaming/resumable CMS
+Open Payments pull verified live against the real public API
+(`src/area/pull_open_payments.py`), the `payments` schema + indexes +
+read-only role + aggregate views (`sql/001_schema.sql`,
+`sql/002_views.sql`), an idempotent Postgres loader
+(`src/area/load_neon.py`), the 5 headline-fact SQL queries drafted
+(`data/facts.md`), and a minimal CLI (`src/area/cli.py`) wiring `area
+pull`/`area load`. Per `SPEC-area.md` section 10's task split.
+
+STATUS: Done.
+
+BUILT:
+- `data/products.json` — generic names `semaglutide`/`tirzepatide`;
+  brand names `Ozempic`, `Wegovy`, `Rybelsus`, `Mounjaro`, `Zepbound`;
+  case-insensitive substring match rule against both
+  `Name_of_Drug_or_Biological_or_Device_or_Medical_Supply_N` and
+  `Product_Category_or_Therapeutic_Area_N` fields; manufacturer-of-record
+  sanity-check config (Novo Nordisk, Eli Lilly; 5% threshold).
+- `src/area/match.py` — `ProductMatch` dataclass, `load_products()`,
+  `find_matches()`, `canonical_product()` (lowest-slot-wins, brand→generic
+  resolution).
+- `src/area/pull_open_payments.py` — `discover_year_dataset()` (verified
+  live against the real DKAN metastore endpoint), a fully streaming
+  scan-and-filter (`io.TextIOWrapper` + `csv.DictReader` over the live
+  HTTP response, straight into `gzip.open(...).write()` — never buffers a
+  whole year), year-granular resumable `pull_year()`/`pull_all_years()`
+  with retry/backoff on transient errors, and a `manifest.json` writer
+  that computes the manufacturer-of-record sanity-check share. Every
+  HTTP call is injectable (`http_get`/`http_stream`), so the whole module
+  is unit-tested with zero network access.
+- `sql/001_schema.sql` / `sql/002_views.sql` — the `payments` table (14
+  columns per spec §3.3; `quarter` made nullable — D7), 5 indexes, the
+  `area_reader` read-only role (`statement_timeout = 10s`), and the
+  `q_totals`/`q_by_specialty`/`q_by_state` views.
+- `src/area/load_neon.py` — `coerce_row()` (type conversion + required-
+  field validation, raising rather than inventing a value for a missing
+  NOT-NULL field), `iter_matched_rows()` (skips any year whose pull isn't
+  marked complete), `ensure_schema()` (idempotent DDL apply), and
+  `load_raw_dir()` (the upsert-on-`record_id` loader itself).
+- `data/facts.md` — the 5 headline SQL queries from spec §3.4, drafted
+  and ready to run; every value marked **PENDING** (D10 — no invented
+  numbers).
+- `src/area/cli.py` — `area pull` and `area load` wired for real; every
+  other subcommand (`tools-test`/`run`/`evals`/`forecast`/`causal`)
+  prints a plain "not built yet" message naming its task (D9).
+- `.env.example`, `.gitignore`, `LICENSE`, `pyproject.toml`, `README.md`,
+  `CONTEXT.md` (this file).
+- 1 commit (`fa28642`) for this task's own scope, plus this report-append
+  commit. Also corrected a stale claim in model-bench's own `CONTEXT.md`
+  (that CMS's hosts are blocked everywhere — they aren't, from a real
+  Mac) in a separate commit there (`ed116d6`).
+- Repo synced to `~/Claude/area` on your Mac for the first time (this
+  repo didn't exist there before): built fresh in the Mac-VM's own home
+  directory via a git bundle transfer, verified there, then `cp -r`'d
+  into the new `~/Claude/area` path (no existing directory to move
+  aside), and checksum-matched against the cloud workspace copy. Mirrored
+  to Drive HQ/giggit/area/ (`area-MANIFEST-2026-09-12-WB1.md`,
+  `README.md`, `CONTEXT.md`).
+
+TESTED:
+- `python3 -m ruff check .` clean. `python3 -m pytest -q`: **45/45**
+  passed in the cloud workspace, including 13 tests run against a REAL
+  scratch PostgreSQL 16 database (`TEST_DATABASE_URL`) — idempotent
+  upsert-and-rerun-changes-nothing, upsert-updates-changed-values,
+  skip-and-report-bad-rows, `ensure_schema` safe to run twice — not
+  mocked.
+- Re-verified on your Mac (fresh clone into the Mac-VM's own home
+  directory, D14 procedure, Python 3.11.15 via `uv`): `ruff check .`
+  clean; `pytest -q`: 40 passed / 5 honestly-skipped (stated reason: no
+  local `TEST_DATABASE_URL` on that shell, matching model-bench's own
+  precedent for this kind of skip); combined `sha256` of all tracked
+  files matched the cloud workspace copy exactly
+  (`8a7ac3ad2e75d1ddae461f7f0199861cffe5499947402c0c0f8a7e521e39c51d`).
+- The installed `area` console script was smoke-tested for real, not
+  just unit-tested: `area tools-test` → plain "not built yet" message,
+  exit 1; `area load` with no `DATABASE_URL` → clear error, exit 1;
+  `area load` against the real scratch Postgres → "loaded 0 rows...",
+  exit 0.
+- `pull_open_payments.py`'s logic (discovery, streaming filter,
+  resumability, retry/backoff, the manufacturer sanity-check math) is
+  fully covered offline (`tests/test_pull_open_payments.py`) via a small
+  fixture CSV shaped like the real one — but its correctness against the
+  REAL CMS API was separately, live-verified (see SPEC CHECK below and
+  this file's dataset-facts table).
+
+SPEC CHECK (§3 and relevant §9 items):
+- §3.1 product match list: exact generic/brand names, the case-
+  insensitive substring rule against both field families, the
+  manufacturer-of-record sanity check — all implemented, 11 tests.
+- §3.2 pull: dataset ids discovered live from the metastore endpoint and
+  recorded above; resumable and retry/backoff-aware on transient errors;
+  the day-1 gate (`discover_year_dataset` raises `LookupError` — a loud
+  stop — if a program year's dataset title isn't found) is implemented
+  and tested. NOT literally "paged" (D1) and NOT literally
+  `page_<n>.json.gz` (D3) — the real API has no pagination at all for
+  this dataset, so the pull streams one bulk CSV per year and stores
+  only the GLP-1-filtered rows plus a full provenance manifest. Both are
+  disclosed, reasoned judgment calls — flagged in OPEN below.
+- §3.3 load: idempotent upsert on `record_id`, proven on a fixture
+  against a REAL Postgres, matching the spec's own wording ("test proves
+  it on a fixture") rather than a mock. Read-only `area_reader` role,
+  `statement_timeout = 10s`, 5 indexes, all 3 views — all present.
+- §3.4 facts.md: all 5 queries drafted; every value PENDING — no
+  invented numbers, per the BUILD INSTRUCTION's hardest rule.
+- §9 acceptance item 1 ("Neon `payments` loaded with all matching rows...
+  raw files in S3 with manifest") is NOT yet met for the whole AREA v0 —
+  no real pull/load has run yet, no S3 bucket exists (Gate 1). This is
+  §9's bar for the finished v0, not W-B1 alone, and is explicitly gated
+  on your go-ahead (see OPEN).
+- Full data / no sampling / no fake numbers / secrets only via env /
+  tests for every metric-parser-guard: all followed — see BUILT/TESTED
+  and D6/D7/D10 above.
+
+OPEN — two things need your call:
+1. **The real ~37.56 GiB (40.33 GB) / 5-year CMS Open Payments pull has
+   not been run.** It can only run from a machine with real network
+   access to `openpaymentsdata.cms.gov`/`download.cms.gov` — this build
+   environment's cloud workspace and Mac-VM sandbox are both blocked
+   (confirmed again today); your real Mac terminal is reachable and is
+   where this file's dataset facts were verified from. The real pull
+   would mean multiple hours of wall-clock time and real bandwidth/disk
+   use on your Mac (streamed, never fully buffered, but still peaking
+   around 9.2 GB in flight for the largest single year). This is a
+   separate decision from the general "GO: WB-1" already given, given the
+   real resource cost on a personal, possibly-unattended machine — asked
+   as a direct, separate question in chat right after this report.
+2. **D1/D3 — the pull's actual design versus the spec's literal §3.2
+   wording.** The real CMS API has no pagination for this dataset at all
+   (one bulk CSV per year), so I built the safest functionally-equivalent
+   version (streamed, year-granular resume, filtered-only raw storage
+   with a full provenance manifest) rather than a literal but
+   non-existent paginated design. Flag if you specifically want the
+   unfiltered multi-GB CSV also archived once the real pull runs, despite
+   the extra storage cost, or if page-cursor resumability was meant more
+   literally than "resumable in substance."
+
+Also open, not spec conflicts, just disclosed choices: D6 (fixed an
+invalid psql-only `CREATE ROLE ... PASSWORD :'...'` syntax before it ever
+ran against a real database), D7 (nullable `quarter`), D8 (`psycopg`
+moved into `dev` extras starting this task, not held for W-B4), D9
+(`cli.py`'s `pull`/`load`-only scope) — see Decisions above for each.
+
+NEXT: W-B2 (per the fixed task order). Per the BUILD INSTRUCTION, I have
+not started it — waiting for your "go", and separately for your answer
+on the real data pull (OPEN item 1 above).
