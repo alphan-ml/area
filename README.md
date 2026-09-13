@@ -77,7 +77,7 @@ for real against a `postgres:16` service container on every push.
     tables/columns/functions, and multi-statement chains, and adds
     `LIMIT 5000` when missing — defense-in-depth on top of
     `sql/001_schema.sql`'s read-only `area_reader` role and its 10s
-    statement timeout (`CONTEXT.md` decision D-query-1).
+    statement timeout (`CONTEXT.md` decision D15).
     `tests/test_query_tool_guardrails.py` covers the validator with zero
     secrets/network, plus two tests against a real scratch Postgres.
   - `forecast_tool.py` — a read-only lookup into `forecast/latest.json`;
@@ -93,13 +93,13 @@ for real against a `postgres:16` service container on every push.
     `tests/test_citation_checker.py`.
 - `src/area/forecast/` — the forecast pipeline `area forecast` runs:
   `models.py` (`seasonal_naive`, `ets`, both with an 80% interval —
-  `point ± 1.2816×residual_std`, `CONTEXT.md` decision D-forecast-1),
+  `point ± 1.2816×residual_std`, `CONTEXT.md` decision D13),
   `holdout.py` (train ≤2024Q4 / test 2025Q1–Q4, MAE + 80% coverage for
   both models, picks the lower-MAE model as primary, writes
   `forecast/latest.json`), and `build_series.py` (builds the national and
   top-N-specialty quarterly series from raw pulled `matched.jsonl.gz`
   files directly — not from Neon — since no database exists yet before
-  Gate 1; `CONTEXT.md` decision D-forecast-2).
+  Gate 1; `CONTEXT.md` decision D14).
   `tests/test_forecast_holdout.py`, `tests/test_build_series.py`.
 - `src/area/cli.py` additions — `area tools-test` (smoke-tests all three
   tools and prints the 5 headline facts from `data/facts.md`, live
