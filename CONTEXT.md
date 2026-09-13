@@ -437,7 +437,7 @@ NEXT: W-B2 (per the fixed task order). Per the BUILD INSTRUCTION, I have
 not started it — waiting for your "go", and separately for your answer
 on the real data pull (OPEN item 1 above).
 
-### TASK: W-B2 — PLACEHOLDER TIMESTAMP, FIXED IN A FOLLOW-UP COMMIT
+### TASK: W-B2 — 2026-09-12 20:31 ET (commit timestamp 00:31:38 UTC, 2026-09-13)
 
 TASK: W-B2 — AREA tools + forecast pipeline: the vendored model-provider
 layer (`src/area/providers/`), the tools registry (`src/area/tools/`)
