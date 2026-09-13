@@ -5,14 +5,28 @@ description = "AREA — Automated Research Evaluation Assistant. v0: GLP-1 manuf
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    # Deliberately zero required runtime dependencies as of W-B1: the CMS
-    # Open Payments pull (src/area/pull_open_payments.py) uses only the
-    # standard library (urllib.request, gzip, json) so it never needs an
-    # installed package to run against the live public API. psycopg (the
-    # Neon/Postgres driver, for src/area/load_neon.py) is imported lazily,
-    # the same pattern as modelbench's boto3 (see model-bench D10) — it is
-    # only needed once a real DATABASE_URL exists (W-B4), never for the
-    # fixture-based idempotency test this task ships.
+    # W-B1 shipped with zero required runtime dependencies: the CMS Open
+    # Payments pull (src/area/pull_open_payments.py) uses only the standard
+    # library. psycopg (the Neon/Postgres driver, for src/area/load_neon.py
+    # and area.tools.query_tool) stays a dev/test-only dependency below
+    # (imported lazily, same pattern as modelbench's boto3 -- see
+    # model-bench D10): it's only needed once a real database is actually
+    # queried (Gate 1), never for the guardrail tests or forecast pipeline.
+    #
+    # W-B2 adds three that ARE needed unconditionally, not just once a
+    # secret exists, so they're core dependencies rather than dev extras:
+    #  - sqlparse: area.tools.query_tool.validate_and_normalize() runs on
+    #    every query_tool call, including the zero-secret guardrail tests
+    #    (task-split section 10) -- it's the guardrail itself, not an
+    #    optional integration.
+    #  - pandas, statsmodels: area.forecast.models.ets() runs for every
+    #    series `area forecast` evaluates (holdout_evaluate scores BOTH
+    #    seasonal_naive and ets for every series, per CONTEXT.md's
+    #    D-forecast-1), so these are needed the moment `area forecast` is
+    #    invoked, not deferred behind a database connection.
+    "sqlparse>=0.6",
+    "pandas>=2.2",
+    "statsmodels>=0.14",
 ]
 
 [project.optional-dependencies]
