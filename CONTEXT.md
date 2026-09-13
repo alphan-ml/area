@@ -170,6 +170,76 @@ It has NOT been run yet — see Open items below.
   plan — no pull runs until Gate 1 is reached, at which point it needs
   its own confirmation to start (not an automatic trigger).
 
+- D12 — 2026-09-13 — **Disclosed judgment call, citation-marker wire
+  format (W-B2)**: SPEC-area.md §4.4/§5.3 describe the citation-checker's
+  job (verify a claimed number against cited evidence or a stated
+  derivation) but don't pin down how a number in the answer text
+  connects to a specific `evidence_id`/`derivation_id`. Built: an inline
+  marker immediately following the number, e.g. `$1,234.56 [q_ab12cd34]`
+  or `24.7% [d_share1]`, looked up first against `evidence`, then
+  `derivations`. A number with no marker, or an unmatched marker id,
+  fails with a stated reason. `src/area/tools/citation_checker.py`'s own
+  module docstring has the full design notes; flag if the agent loop
+  (W-B4) needs a different composer-output convention.
+
+- D13 — 2026-09-13 — **Disclosed judgment call, forecast interval
+  methodology (W-B2)**: the spec asks for "an 80% interval" for both
+  `seasonal_naive` and `ets` without specifying how to compute one. Built:
+  a symmetric interval, `point ± 1.2816 × residual_std` (the two-sided
+  80% normal critical value), using each model's own in-sample one-step-
+  ahead residual standard deviation — so the two models' holdout coverage
+  numbers are directly comparable. `src/area/forecast/models.py`.
+
+- D14 — 2026-09-13 — **Disclosed judgment call, `build_series.py` reads
+  raw files, not Neon (W-B2)**: the repo layout's own inline comment
+  sketches a Neon-backed builder ("Neon -> quarterly series"), but
+  task-split §10's actual W-B2 line says the forecast build "runs locally
+  on DuckDB or pandas from raw" and gives an explicit reason ("no secrets
+  for tests"). No Neon database exists yet regardless (Gate 1, D11), so
+  built `build_series.py` to read `raw/<year>/matched.jsonl.gz` directly
+  via `load_neon`'s own `iter_matched_rows`/`coerce_row` — the more
+  specific, reasoned line, not a blocking spec contradiction. A future
+  Neon-backed builder can be added alongside this one without changing
+  `holdout.py`'s interface. `src/area/forecast/build_series.py`.
+
+- D15 — 2026-09-13 — **Disclosed judgment call, query-tool guardrail is
+  defense-in-depth, not a full SQL semantic analyzer (W-B2)**:
+  `validate_and_normalize()` checks tables/views against an exact
+  allow-list and flags any other bare identifier that isn't a known
+  column/alias/keyword/function — it does not fully resolve per-table
+  column scoping (e.g. it would not catch `payments.total_usd`, a column
+  that exists on `q_totals` but not `payments`). A real SQL semantic
+  analyzer/planner is out of scope for a v0 text-level guardrail whose
+  job is to catch the spec's named attack shapes (injection strings,
+  UPDATE/DELETE, multi-statement, a genuinely unknown column, missing
+  LIMIT) — `sql/001_schema.sql`'s read-only `area_reader` role (SELECT-
+  only, 10s `statement_timeout`) is the real backstop for anything a text
+  validator gap might miss. Validated empirically against 26 hand-built
+  SQL test cases (injection, DDL/DML, multi-statement, CTEs, joins,
+  subqueries, comments) before formalizing into pytest.
+  `src/area/tools/query_tool.py`.
+
+- D16 — 2026-09-13 — **Real bug found and fixed while testing D15's
+  guardrail against real Postgres**: running `data/facts.md`'s own
+  query 5 (the "Food and Beverage share" query, spec §3.4) through
+  `area tools-test` against a real scratch database, the validator
+  rejected it — `FILTER (WHERE ...)` (Postgres's aggregate-filter clause,
+  which `sqlparse` tokenizes as a plain, non-keyword `Name` followed by
+  `(`, indistinguishable from a function call) and `NULLIF` (simply
+  missing from `_ALLOWED_FUNCTIONS`) were both flagged as "not
+  allow-listed." Fixed: added `nullif` to `_ALLOWED_FUNCTIONS`, and
+  special-cased the literal word `filter` so it's recognized as the
+  clause keyword it is rather than requiring it to be an allow-listed
+  function — its parenthesized `WHERE` body is still fully checked like
+  any other subexpression, so this doesn't loosen the column/table
+  allow-list at all. Added
+  `test_facts_md_query_5_with_filter_and_nullif_is_not_rejected` and
+  `test_filter_clause_still_checks_its_column_reference` to
+  `tests/test_query_tool_guardrails.py` so this exact spec-provided query
+  never regresses. This was caught by testing against real data, not
+  hypothetically — flagging in case any other real query later surfaces
+  a similar sqlparse-tokenization gap.
+
 ## Open items (blocked on Leon)
 
 - **The real ~37.56 GiB / 5-year pull is deferred to Gate 1 (D11).** It
@@ -195,15 +265,24 @@ It has NOT been run yet — see Open items below.
 - D9 (above): `cli.py`'s scope (`pull`/`load` only, others stubbed) — flag
   if a different minimum CLI surface was expected from W-B1.
 - No S3 bucket yet (D4, Gate 1) — same open item as model-bench's.
+- D12–D15 (above, W-B2): four more disclosed judgment calls (citation-
+  marker wire format, forecast interval methodology, `build_series.py`
+  reading raw files instead of Neon, and the query guardrail's
+  defense-in-depth scope) — flag any of them if a different design was
+  specifically wanted.
+- Until the real pull/load runs (Gate 1): `area tools-test`'s query_tool
+  check and the 5 headline facts stay "NOT AVAILABLE"/"PENDING", and
+  `area forecast` has no real series to build yet — all W-B2 code and
+  tests are ready and passing against synthetic/fixture data and a real
+  scratch Postgres; only real CMS data is missing.
 
 ## Not yet built
 
-Everything past W-B1: `src/area/tools/` (registry, query tool, forecast
-tool, citation checker — W-B2); `src/area/agent/` (planner, actor,
-verifier, loop), `src/area/evals/`, trace writers (W-B4); `web/` and its
-Vercel functions (W-B5); `src/area/causal/` (W-B3, Sunday). The real data
-pull and load (above) are also not yet run, independent of code — the
-code and its tests are ready for the moment the pull is authorized.
+The agent loop (planner, actor, verifier, loop), `src/area/evals/`,
+trace writers (W-B4); `web/` and its Vercel functions (W-B5);
+`src/area/causal/` (W-B3, Sunday). The real data pull and load (above)
+are also not yet run, independent of code — the code and its tests are
+ready for the moment the pull is authorized (Gate 1).
 
 ## Reports
 
@@ -357,3 +436,138 @@ moved into `dev` extras starting this task, not held for W-B4), D9
 NEXT: W-B2 (per the fixed task order). Per the BUILD INSTRUCTION, I have
 not started it — waiting for your "go", and separately for your answer
 on the real data pull (OPEN item 1 above).
+
+### TASK: W-B2 — PLACEHOLDER TIMESTAMP, FIXED IN A FOLLOW-UP COMMIT
+
+TASK: W-B2 — AREA tools + forecast pipeline: the vendored model-provider
+layer (`src/area/providers/`), the tools registry (`src/area/tools/`)
+with all three SPEC-area.md §4 tools (query_tool, forecast_tool,
+citation_checker), the forecast pipeline (`src/area/forecast/`:
+models, holdout evaluation, series builder), and CLI wiring for `area
+tools-test` and `area forecast`. Per `SPEC-area.md` section 10's W-B2
+task-split line: "query tool + guardrail tests, forecast build + holdout
+on the pulled data (runs locally on DuckDB or pandas from raw), citation
+checker + tests, registry."
+
+STATUS: Done.
+
+BUILT:
+- `src/area/providers/` — `base.py` (`CallResult`, `Provider`,
+  `RetryableError`, `call_with_retries`), `bedrock.py`,
+  `anthropic_direct.py`, `openai_compatible.py`, `fake.py`, `__init__.py`
+  (`get_provider()`) — vendored from model-bench per the spec's own
+  instruction ("copy the package or vendor it; same interface, same
+  logging"), only the import namespace changed.
+- `src/area/tools/__init__.py` — `Evidence`, `ToolResult`, `Tool`
+  dataclasses, and `registry()` (lazily imports each tool module so
+  importing `area.tools` never requires every tool's own dependencies).
+- `src/area/tools/query_tool.py` — question -> model-generated SQL ->
+  `validate_and_normalize()` (single-SELECT only, allow-listed
+  tables/columns/functions only, `LIMIT 5000` added if missing,
+  multi-statement chains rejected) -> executed read-only -> rows +
+  `evidence_id` ("q_<sha8>"). Built on `sqlparse`'s structured token tree
+  so CTEs, joins, subqueries, and comma-joined FROM lists are all
+  correctly recognized (D15).
+- `src/area/tools/forecast_tool.py` — read-only lookup into
+  `forecast/latest.json`; never computes a forecast itself; returns a
+  clear error (never a fabricated number) if the file or series doesn't
+  exist yet.
+- `src/area/tools/citation_checker.py` — checks every non-year number in
+  drafted answer text against its inline citation marker (D12), matching
+  cited evidence within tolerance (0.5% relative or displayed precision)
+  or recomputing a stated derivation with a restricted-AST safe
+  evaluator (never Python `eval`).
+- `src/area/forecast/models.py` — `seasonal_naive` and `ets` (lazy
+  pandas/statsmodels import), both with an 80% interval via `point ±
+  1.2816×residual_std` (D13).
+- `src/area/forecast/holdout.py` — trains on quarters <=2024Q4, tests on
+  2025Q1-2025Q4, reports MAE and 80% coverage for both models, picks the
+  lower-MAE model as primary, and `run()` (the `area forecast` entry
+  point) writes `forecast/latest.json`, recording any series with too
+  little history as honestly skipped rather than fabricating a forecast.
+- `src/area/forecast/build_series.py` — builds the national and
+  top-N-specialty quarterly series directly from raw pulled
+  `matched.jsonl.gz` files (D14), reusing `load_neon`'s own
+  `iter_matched_rows`/`coerce_row`.
+- `src/area/cli.py` — `area tools-test` (smoke-tests all three tools;
+  prints the 5 `data/facts.md` headline facts live against a configured
+  database, or an honest "NOT AVAILABLE"/"PENDING" line naming why, never
+  a fake number) and `area forecast` (runs the pipeline above end-to-end).
+- Found and fixed a real guardrail bug while testing against real
+  Postgres: `data/facts.md`'s own query 5 (`FILTER (WHERE ...)` +
+  `NULLIF`) was being rejected by the validator (D16).
+- `pyproject.toml` — added `sqlparse`, `pandas`, `statsmodels` as core
+  runtime dependencies (all three run unconditionally, not just once a
+  secret exists — see the file's own updated comment); `psycopg` stays a
+  dev/test-only dependency (still lazily imported, still only needed once
+  a real database is actually queried).
+- `README.md` — new "What's built (W-B2)" section; "Not yet built"
+  narrowed to W-B3/B4/B5 plus the still-open Gate-1 items.
+- `CONTEXT.md` (this file) — decisions D12-D16, updated Open items and
+  Not yet built.
+
+TESTED:
+- `python3 -m ruff check .` clean. `python3 -m pytest -q`: **128/128**
+  passed, including 15 tests run against a REAL scratch PostgreSQL 16
+  database (`TEST_DATABASE_URL`): the 13 W-B1 idempotency tests plus 2 new
+  W-B2 query_tool execution tests (a valid query returns real rows +
+  evidence, a rejected query never reaches the database) — not mocked.
+- The installed `area` console script was smoke-tested for real, not just
+  unit-tested: `area tools-test` with no database/forecast file ->
+  `citation_checker: PASS`, `forecast_tool: NOT AVAILABLE YET`,
+  `query_tool: NOT AVAILABLE`, all 5 facts `PENDING` — honest, not faked
+  — exit 0. `area tools-test` against the real scratch Postgres (one
+  seeded row) -> `query_tool: PASS`, all 5 facts computed for real (e.g.
+  `Share of dollars that are Food and Beverage: {'food_and_beverage_share_pct': Decimal('100.00')}`)
+  -- exit 0. `area forecast` against a synthetic 5-year/4-specialty raw
+  dataset -> wrote `forecast/latest.json`, "4 series computed, 0 skipped"
+  -- exit 0; `area tools-test` against that real output file ->
+  `forecast_tool: PASS`.
+- `tests/test_cli.py` updated: the old "tools-test is not built yet" test
+  replaced with a "causal is not built yet" test (still true, W-B3), plus
+  4 new tests covering `tools-test` (no-database honesty, and a full
+  real-Postgres run) and `forecast` (missing raw-dir, and computed/skipped
+  reporting via a monkeypatched `holdout.run`).
+
+SPEC CHECK (§4 and relevant §9/§10 items):
+- §4.1 registry: exactly the three tools, each with a plain-English
+  description, JSON input schema, and callable — `tests/test_tools_registry.py`.
+- §4.2 query tool: single-SELECT enforcement, allow-listed
+  tables/columns/functions, `LIMIT 5000` auto-add, multi-statement
+  rejection, `evidence_id` "q_<sha8>" — all implemented and tested
+  against the named attack shapes (injection, UPDATE/DELETE,
+  multi-statement, unknown column, missing LIMIT) plus 2 live-Postgres
+  execution tests.
+- §4.3 forecast tool + pipeline: `area forecast` computes both models'
+  holdout MAE/80%-coverage, picks the primary by lower MAE, writes
+  `forecast/latest.json`; `forecast_tool.py` is a pure read-only lookup
+  over that file, per the spec's own wording.
+- §4.4 citation checker: verifies numbers against cited evidence
+  (tolerance-aware) or recomputes stated derivations; years excluded;
+  wrong-derivation and no-marker cases both fail with a stated reason —
+  `tests/test_citation_checker.py`.
+- §9 acceptance criterion 2 ("Three tools pass their tests; `area
+  tools-test` runs all three against Neon and prints the 5 facts") is
+  **partially met, disclosed honestly**: all three tools pass their own
+  tests (128/128), and `area tools-test` runs all three and prints the 5
+  facts exactly as the criterion asks — but there is still no real Neon
+  database and no real pulled CMS data (both explicitly deferred to Gate
+  1 by your own D11 decision), so `query_tool` and the 5 facts report
+  "NOT AVAILABLE"/"PENDING" rather than real numbers when run without a
+  database configured, and report real numbers (verified against a real
+  scratch Postgres) when one is. This is the same honest-disclosure
+  pattern as W-B1's own §9 item 1.
+- Full data / no sampling / no fake numbers / secrets only via env vars /
+  tests for every metric-parser-guard: all followed — see BUILT/TESTED
+  and D12-D16 above.
+
+OPEN — same two Gate-1-blocked items as W-B1's report (no change since
+D11 settled them): the real ~37.56 GiB/5-year CMS pull, and the real Neon
+database, both wait for Gate 1. Nothing new to ask this task — D12-D16
+above are disclosed judgment calls, not spec conflicts, flagged for your
+awareness rather than blocking on an answer.
+
+NEXT: per the fixed task order, Sync/deploy tooling comes next, then Gate
+1 (your credentials), then W-A4/W-M2/W-B4/W-B5/W-B3. Per the BUILD
+INSTRUCTION, I have not started Sync/deploy tooling — waiting for your
+next "go".

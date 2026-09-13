@@ -3,8 +3,8 @@
 v0 instance: GLP-1 manufacturer payments to U.S. clinicians, built from CMS
 Open Payments' public "general payments" dataset, program years 2021–2025.
 Full spec: `SPEC-area.md` (Drive HQ). This README documents what is
-**actually built so far** (task W-B1); see `CONTEXT.md` for the decision
-log, open items, and per-task reports.
+**actually built so far** (tasks W-B1, W-B2); see `CONTEXT.md` for the
+decision log, open items, and per-task reports.
 
 ## How to run
 
@@ -19,10 +19,11 @@ commands, for the same PATH-isolation reason noted in model-bench's
 CONTEXT.md.
 
 Most tests need no network or database. The loader's idempotency tests
-(`tests/test_load_idempotent.py`) need a real scratch Postgres — set
-`TEST_DATABASE_URL` (see `.env.example`) or they skip cleanly with a
-stated reason. CI (`.github/workflows/ci.yml`) runs them for real against
-a `postgres:16` service container on every push.
+(`tests/test_load_idempotent.py`) and the query tool's real-execution
+tests (`tests/test_query_tool_guardrails.py`) need a real scratch
+Postgres — set `TEST_DATABASE_URL` (see `.env.example`) or they skip
+cleanly with a stated reason. CI (`.github/workflows/ci.yml`) runs them
+for real against a `postgres:16` service container on every push.
 
 ## What's built (W-B1)
 
@@ -57,6 +58,60 @@ a `postgres:16` service container on every push.
   (`tools-test`, `run`, `evals`, `forecast`, `causal`) prints a plain
   "not built yet" message naming the task that adds it, instead of
   failing to import.
+
+## What's built (W-B2)
+
+- `src/area/providers/` — the same model-call provider layer as
+  model-bench (bedrock/anthropic_direct/openai_compatible/fake), vendored
+  with only the import namespace changed (per SPEC-area.md's own
+  instruction to copy or vendor it). `tests/test_providers.py` mirrors
+  model-bench's own provider tests: every network boundary is faked, never
+  real.
+- `src/area/tools/` — the three tools SPEC-area.md section 4 defines,
+  each a plain `(name, description, input_schema, fn)` `Tool` the later
+  agent loop (W-B4) will call, plus `registry()` (`tests/test_tools_registry.py`):
+  - `query_tool.py` — question → SQL (model-generated, injectable for
+    tests) → validated → executed read-only → rows + `evidence_id`. The
+    validator (`validate_and_normalize`) rejects anything that isn't
+    exactly one `SELECT`, any reference outside the allow-listed
+    tables/columns/functions, and multi-statement chains, and adds
+    `LIMIT 5000` when missing — defense-in-depth on top of
+    `sql/001_schema.sql`'s read-only `area_reader` role and its 10s
+    statement timeout (`CONTEXT.md` decision D-query-1).
+    `tests/test_query_tool_guardrails.py` covers the validator with zero
+    secrets/network, plus two tests against a real scratch Postgres.
+  - `forecast_tool.py` — a read-only lookup into `forecast/latest.json`;
+    it never computes a forecast itself. Returns a clear error (never a
+    fabricated number) if that file or the requested series doesn't
+    exist yet. `tests/test_forecast_tool.py`.
+  - `citation_checker.py` — checks every non-year number in a drafted
+    answer against its inline `[evidence_id]`/`[derivation_id]` marker,
+    verifying it against the cited evidence payload (0.5% relative or
+    displayed-precision tolerance) or recomputing a stated derivation
+    expression with a restricted AST evaluator (never Python `eval`).
+    Wire format documented as `CONTEXT.md` decision D12.
+    `tests/test_citation_checker.py`.
+- `src/area/forecast/` — the forecast pipeline `area forecast` runs:
+  `models.py` (`seasonal_naive`, `ets`, both with an 80% interval —
+  `point ± 1.2816×residual_std`, `CONTEXT.md` decision D-forecast-1),
+  `holdout.py` (train ≤2024Q4 / test 2025Q1–Q4, MAE + 80% coverage for
+  both models, picks the lower-MAE model as primary, writes
+  `forecast/latest.json`), and `build_series.py` (builds the national and
+  top-N-specialty quarterly series from raw pulled `matched.jsonl.gz`
+  files directly — not from Neon — since no database exists yet before
+  Gate 1; `CONTEXT.md` decision D-forecast-2).
+  `tests/test_forecast_holdout.py`, `tests/test_build_series.py`.
+- `src/area/cli.py` additions — `area tools-test` (smoke-tests all three
+  tools and prints the 5 headline facts from `data/facts.md`, live
+  against a configured database, or an honest "NOT AVAILABLE"/"PENDING"
+  when one isn't configured — never a fake number) and `area forecast`
+  (runs the pipeline above end-to-end and writes `forecast/latest.json`).
+
+**Full-repo test status: 128/128 passed** (`python3 -m ruff check .` and
+`python3 -m pytest -q`), including real-Postgres tests for both the
+loader (W-B1) and the query tool (W-B2). See `CONTEXT.md`'s W-B2 report
+for the exact commands and honest disclosure of what still can't run for
+real (Gate 1: no database, no pulled data yet).
 
 ## CMS Open Payments dataset facts (verified live, 2026-09-12)
 
@@ -95,8 +150,11 @@ see `CONTEXT.md`.
 
 ## Not yet built
 
-Everything past W-B1: the tools registry, query tool, forecast tool,
-citation checker (W-B2); the agent loop, golden-set evals, trace writers
+The agent loop (planner/actor/verifier), golden-set evals, trace writers
 (W-B4); the web page and its Vercel functions (W-B5); the causal
 estimator simulation (W-B3, Sunday). See `SPEC-area.md` section 10 for
-the full task split.
+the full task split. Also still open regardless of task: the real CMS
+Open Payments pull, and the real Neon database — both explicitly
+deferred to Gate 1 (`CONTEXT.md` decision D11), so `area tools-test`'s
+query_tool/facts and `area forecast`'s series are honestly "NOT
+AVAILABLE"/"PENDING" until then, not fabricated.
