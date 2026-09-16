@@ -42,6 +42,12 @@ dev = [
     # its module docstring), so this is a dev/test dependency, not a
     # runtime one, until W-B4 wires the live Neon database.
     "psycopg[binary]>=3.1",
+    # D17 (CONTEXT.md): area.pull_open_payments's streaming mode
+    # (pull_year_stream / _S3MultipartTee) tees the raw CSV to S3 via
+    # boto3's multipart-upload calls. Same lazy-import pattern as
+    # psycopg/model-bench's boto3 (D10) -- only needed once `area pull
+    # --stream` actually runs, not for the offline/fixture tests.
+    "boto3>=1.34",
 ]
 
 [project.scripts]

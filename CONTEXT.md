@@ -240,6 +240,41 @@ It has NOT been run yet — see Open items below.
   hypothetically — flagging in case any other real query later surfaces
   a similar sqlparse-tokenization gap.
 
+- D17 -- 2026-09-16 -- **Project owner's decision: Gate 1 reached, real pull
+  authorized (this session)**. CONTEXT.md's D11 deferred the real
+  ~37.56 GiB/5-year CMS pull to Gate 1 (S3 + Neon credentials in place)
+  and required a fresh explicit go-ahead once reached. Gate 1 is reached
+  (S3 bucket `giggit-area-raw-payments` exists and is reachable; Neon/
+  Postgres connection verified earlier the same day against a real
+  scratch database, `uv run pytest` passing) and the project owner
+  confirmed, in this session, to proceed with the real pull now. Local
+  disk on the pull machine is tight (~18-25 GiB free against a ~37.56
+  GiB/5-year raw total), so this also authorizes a **streaming** pull/
+  load mode rather than the local-disk-buffered `pull_year`/`load_raw_dir`
+  path W-B1 shipped: `pull_year_stream` (src/area/pull_open_payments.py)
+  tees each year's raw CSV, chunk by chunk as it downloads, to an S3
+  multipart upload (`s3://<bucket>/raw/<year>/<file>`) via
+  `_S3MultipartTee`, in the same pass as the existing row-by-row filter,
+  so the ~6.5-9.2 GB/year raw file is never buffered whole on local disk
+  or in memory -- at most one multipart part (8 MiB) is held at a time.
+  Matched rows are upserted straight into Postgres in that same pass when
+  a database URL is given (`load_neon.coerce_row`/`UPSERT_SQL`, batched),
+  reusing the exact idempotent upsert-on-`record_id` path `load_raw_dir`
+  already used -- not a second, divergent write path. `matched.jsonl.gz`
+  is still written locally per year (small -- matched rows only) as the
+  audit trail D3 already established; only the ~6.5-9.2 GB/year *raw*
+  CSV is the thing this streams past local disk. `area pull --stream
+  --s3-bucket <bucket> [--database-url ...]` and `area load --stream
+  --batch-size N [--s3-bucket <bucket>]` (the latter batch-commits
+  instead of one end-of-run transaction, and optionally HeadObject-
+  verifies each year's S3 mirror before loading) wire this in; the
+  original non-streaming `pull_year`/`load_raw_dir` paths are unchanged
+  and still the default. See tests/test_pull_open_payments_stream.py
+  (offline, fake-S3-client) and the batch-size tests appended to
+  tests/test_load_idempotent.py (real scratch Postgres) for proof this
+  doesn't change the pull's row-matching logic or the load's idempotency
+  guarantee -- only how the bytes move.
+
 ## Open items (blocked on Leon)
 
 - **The real ~37.56 GiB / 5-year pull is deferred to Gate 1 (D11).** It

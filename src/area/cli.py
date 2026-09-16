@@ -11,6 +11,17 @@ them now prints a plain "not built yet" message and exits 1, rather than
 a traceback -- `pyproject.toml` already declares this file as the `area`
 console script's entry point, so it has to import cleanly and behave
 sanely today even though some subcommands are still to come.
+
+D17 (CONTEXT.md) added `--stream`/`--s3-bucket` to `pull` and
+`--stream`/`--batch-size`/`--s3-bucket` to `load`, for the real ~37.56
+GiB/5-year pull: `pull --stream` tees each year's raw CSV to S3 while
+filtering it, never buffering the whole file locally, and upserts matched
+rows straight into Postgres in the same pass when `--database-url` (or
+`DATABASE_URL`) is set; `load --stream` batch-commits instead of holding
+one big end-of-run transaction, and `load --s3-bucket` does a lightweight
+HeadObject size check against each year's manifest before loading, so a
+short-uploaded S3 mirror is caught rather than silently loaded from a
+locally-complete but not-yet-fully-mirrored matched file.
 """
 
 from __future__ import annotations
@@ -80,11 +91,38 @@ def _build_parser() -> argparse.ArgumentParser:
     pull_p.add_argument("--out-dir", default="raw")
     pull_p.add_argument("--year", type=int, action="append", dest="years")
     pull_p.add_argument("--force", action="store_true")
+    pull_p.add_argument(
+        "--stream",
+        action="store_true",
+        help="Tee each year's raw CSV to S3 while filtering it, never buffering the "
+        "whole file locally (D17). Requires --s3-bucket.",
+    )
+    pull_p.add_argument(
+        "--s3-bucket", default=None, help="S3 bucket for --stream's raw-CSV mirror."
+    )
+    pull_p.add_argument(
+        "--database-url",
+        default=None,
+        help="With --stream, upsert matched rows into Postgres in the same pass "
+        "(falls back to $DATABASE_URL). Without --stream, ignored -- use `area load`.",
+    )
 
     load_p = sub.add_parser("load", help="Load raw pulled data into Postgres (W-B1)")
     load_p.add_argument("--raw-dir", default="raw")
     load_p.add_argument("--year", type=int, action="append", dest="years")
     load_p.add_argument("--database-url", default=None)
+    load_p.add_argument(
+        "--stream",
+        action="store_true",
+        help="Batch-commit (see --batch-size) instead of one commit at the end (D17).",
+    )
+    load_p.add_argument("--batch-size", type=int, default=2000)
+    load_p.add_argument(
+        "--s3-bucket",
+        default=None,
+        help="If set, HeadObject-check each loaded year's manifest.json s3_key/bytes "
+        "against this bucket before loading (D17); mismatches are printed, not fatal.",
+    )
 
     tools_test_p = sub.add_parser(
         "tools-test",
@@ -108,14 +146,84 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _run_pull(args: argparse.Namespace) -> int:
-    manifests = pull_all_years(Path(args.out_dir), years=args.years or YEARS, force=args.force)
+    if args.stream:
+        if not args.s3_bucket:
+            print("area pull --stream requires --s3-bucket", file=sys.stderr)
+            return 1
+        database_url = args.database_url or os.environ.get("DATABASE_URL")
+        manifests = pull_all_years(
+            Path(args.out_dir),
+            years=args.years or YEARS,
+            force=args.force,
+            stream=True,
+            s3_bucket=args.s3_bucket,
+            database_url=database_url,
+        )
+    else:
+        manifests = pull_all_years(Path(args.out_dir), years=args.years or YEARS, force=args.force)
     for m in manifests:
         status = "OK" if m["complete"] else f"FAILED: {m['error']}"
+        extra = (
+            f" -- {m['bytes']} bytes -> s3://{m['s3_bucket']}/{m['s3_key']}"
+            if m.get("bytes")
+            else ""
+        )
         print(
             f"{m['year']}: {status} -- "
-            f"{m.get('rows_matched', 0)} matched / {m.get('rows_scanned', 0)} scanned"
+            f"{m.get('rows_matched', 0)} matched / {m.get('rows_scanned', 0)} scanned{extra}"
         )
     return 0 if all(m["complete"] for m in manifests) else 1
+
+
+def _verify_s3_manifests(raw_dir: Path, s3_bucket: str, years: list[int] | None) -> None:
+    """Lightweight pre-load integrity check for `load --s3-bucket`: for
+    every requested year's manifest that records an s3_key/bytes pair
+    (i.e. it was pulled with `pull --stream`), HeadObject that key and
+    compare ContentLength. Prints a PASS/WARN line per year; never raises
+    -- a missing boto3 or an unreachable bucket is reported, not fatal,
+    because loading from the already-complete local matched.jsonl.gz is
+    still valid without this check."""
+    if not raw_dir.exists():
+        return
+    try:
+        import boto3  # noqa: PLC0415 -- lazy, same pattern as psycopg
+        s3 = boto3.client("s3")
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"area load --s3-bucket: boto3 unavailable, skipping S3 check ({exc})",
+            file=sys.stderr,
+        )
+        return
+    for year_dir in sorted(p for p in raw_dir.iterdir() if p.is_dir()):
+        try:
+            year = int(year_dir.name)
+        except ValueError:
+            continue
+        if years is not None and year not in years:
+            continue
+        manifest_path = year_dir / "manifest.json"
+        if not manifest_path.exists():
+            continue
+        import json  # noqa: PLC0415
+
+        manifest = json.loads(manifest_path.read_text())
+        s3_key = manifest.get("s3_key")
+        expected_bytes = manifest.get("bytes")
+        if not s3_key or expected_bytes is None:
+            continue
+        try:
+            head = s3.head_object(Bucket=s3_bucket, Key=s3_key)
+            actual_bytes = head["ContentLength"]
+            if actual_bytes == expected_bytes:
+                print(f"  s3 check {year}: PASS ({actual_bytes} bytes at s3://{s3_bucket}/{s3_key})")
+            else:
+                print(
+                    f"  s3 check {year}: WARN -- manifest says {expected_bytes} bytes, "
+                    f"S3 has {actual_bytes} at s3://{s3_bucket}/{s3_key}",
+                    file=sys.stderr,
+                )
+        except Exception as exc:  # noqa: BLE001
+            print(f"  s3 check {year}: WARN -- {exc}", file=sys.stderr)
 
 
 def _run_load(args: argparse.Namespace) -> int:
@@ -126,8 +234,15 @@ def _run_load(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 1
+    if args.s3_bucket:
+        _verify_s3_manifests(Path(args.raw_dir), args.s3_bucket, years=args.years)
     ensure_schema(database_url, SCHEMA_SQL_PATHS)
-    stats = load_raw_dir(database_url, Path(args.raw_dir), years=args.years)
+    stats = load_raw_dir(
+        database_url,
+        Path(args.raw_dir),
+        years=args.years,
+        batch_size=args.batch_size if args.stream else None,
+    )
     print(
         f"loaded {stats.rows_upserted} rows ({stats.rows_skipped_bad} skipped) "
         f"across years {stats.years_loaded}"
@@ -144,10 +259,10 @@ def _run_tools_test(args: argparse.Namespace) -> int:
     query_tool (and the 5 facts) each depend on a precondition this repo
     doesn't have yet -- forecast/latest.json (needs `area forecast` run
     against real pulled data) and a configured database -- both deferred
-    to Gate 1 by Leon's decision D11. Rather than skip them silently or
-    fake a result, this prints a plain "NOT AVAILABLE" line stating why,
-    and only fails the command (non-zero exit) on an actual tool failure,
-    never on an unmet Gate-1 precondition."""
+    to Gate 1 by the project owner's decision D11. Rather than skip them
+    silently or fake a result, this prints a plain "NOT AVAILABLE" line
+    stating why, and only fails the command (non-zero exit) on an actual
+    tool failure, never on an unmet Gate-1 precondition."""
     from area.tools import registry
     from area.tools.forecast_tool import run as forecast_tool_run
     from area.tools.query_tool import run as query_tool_run

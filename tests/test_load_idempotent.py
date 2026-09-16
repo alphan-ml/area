@@ -242,3 +242,36 @@ def test_load_raw_dir_records_years_loaded(tmp_path, database_url):
 
     stats = load_raw_dir(database_url, raw_dir)
     assert stats.years_loaded == [2022, 2023]
+
+
+def test_load_raw_dir_batch_size_produces_same_result_as_unbatched(tmp_path, database_url):
+    # D17: batch_size batches upserts via executemany + periodic commits
+    # instead of one execute()-per-row + a single end-of-run commit.
+    # Batched and unbatched loads of the same rows must land identically.
+    ensure_schema(database_url, SQL_PATHS)
+    raw_dir = tmp_path / "raw"
+    rows = [_sample_row(record_id=f"rec-batch-{i}", amount_usd=f"{i}.00") for i in range(7)]
+    _write_matched_year(raw_dir, 2023, rows)
+
+    stats = load_raw_dir(database_url, raw_dir, batch_size=3)
+    assert stats.rows_upserted == 7
+    assert _row_count(database_url) == 7
+
+    # Re-running batched is still idempotent (D17 must not weaken D-idempotency).
+    stats_again = load_raw_dir(database_url, raw_dir, batch_size=3)
+    assert stats_again.rows_upserted == 7
+    assert _row_count(database_url) == 7
+
+
+def test_load_raw_dir_batch_size_skips_bad_rows_same_as_unbatched(tmp_path, database_url):
+    ensure_schema(database_url, SQL_PATHS)
+    raw_dir = tmp_path / "raw"
+    good_rows = [_sample_row(record_id=f"rec-good-{i}") for i in range(3)]
+    bad_row = _sample_row(record_id="rec-bad-batch", manufacturer="")
+    _write_matched_year(raw_dir, 2023, [*good_rows, bad_row])
+
+    stats = load_raw_dir(database_url, raw_dir, batch_size=2)
+    assert stats.rows_seen == 4
+    assert stats.rows_upserted == 3
+    assert stats.rows_skipped_bad == 1
+    assert _row_count(database_url) == 3

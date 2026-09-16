@@ -20,6 +20,16 @@ connection, the same pattern as model-bench's boto3 (see model-bench's
 CONTEXT.md decision D10) and this repo's own pyproject.toml note: nothing
 in this module needs psycopg installed to be imported or to run the
 type-coercion logic offline.
+
+D17 (CONTEXT.md) added `batch_size` to `load_raw_dir` (wired to `area
+load --stream --batch-size`): with a batch size given, rows are upserted
+`executemany`-batched with a commit every `batch_size` rows instead of
+one `execute()`-per-row in a single end-of-run transaction. This matters
+for the real multi-million-row load, where one giant transaction is both
+slower (no intermediate commits) and riskier (any failure loses the
+whole run's progress, not just the current batch). Default behavior
+(`batch_size=None`) is unchanged from before D17, so existing callers and
+tests see identical behavior.
 """
 
 from __future__ import annotations
@@ -181,17 +191,27 @@ def ensure_schema(database_url: str, sql_paths: list[Path]) -> None:
 
 
 def load_raw_dir(
-    database_url: str, raw_dir: Path, years: list[int] | None = None
+    database_url: str,
+    raw_dir: Path,
+    years: list[int] | None = None,
+    batch_size: int | None = None,
 ) -> LoadStats:
     """Loads every complete year's matched rows under raw_dir into the
     payments table via upsert on record_id. Does NOT call ensure_schema --
     callers (the CLI, tests) call that explicitly first so a load never
-    silently creates schema the caller didn't ask for."""
+    silently creates schema the caller didn't ask for.
+
+    With `batch_size=None` (the default, unchanged since before D17), rows
+    are upserted one `execute()` at a time and committed once at the end.
+    With a `batch_size` given, rows are upserted in `executemany()`
+    batches of that size, each followed by its own commit -- see this
+    module's docstring for why (D17)."""
     psycopg = _lazy_psycopg()
     stats = LoadStats()
     years_seen: set[int] = set()
     with psycopg.connect(database_url) as conn:
         with conn.cursor() as cur:
+            batch: list[dict] = []
             for raw in iter_matched_rows(raw_dir, years=years):
                 stats.rows_seen += 1
                 try:
@@ -200,9 +220,21 @@ def load_raw_dir(
                     stats.rows_skipped_bad += 1
                     stats.errors.append(str(exc))
                     continue
-                cur.execute(UPSERT_SQL, row)
-                stats.rows_upserted += 1
                 years_seen.add(row["program_year"])
-        conn.commit()
+                if batch_size:
+                    batch.append(row)
+                    stats.rows_upserted += 1
+                    if len(batch) >= batch_size:
+                        cur.executemany(UPSERT_SQL, batch)
+                        conn.commit()
+                        batch = []
+                else:
+                    cur.execute(UPSERT_SQL, row)
+                    stats.rows_upserted += 1
+            if batch_size and batch:
+                cur.executemany(UPSERT_SQL, batch)
+                conn.commit()
+        if not batch_size:
+            conn.commit()
     stats.years_loaded = sorted(years_seen)
     return stats
