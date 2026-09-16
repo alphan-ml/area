@@ -765,3 +765,111 @@ becoming non-zero; nothing else is outstanding for W-B4 itself.
 
 NEXT: W-B5 (web/ + Vercel functions), then W-B3 (causal), then
 data/facts.md, per this session's own task order.
+
+### TASK: W-B5 — 2026-09-16 13:3x ET (commit timestamp see git log)
+
+TASK: W-B5 — `web/`: Vercel Node functions `/api/health`, `/api/facts`,
+`/api/ask`, and a minimal front page that calls them. Per model-bench's
+own `web/package.json` rule ("Python never deploys here"), this is an
+independent JS implementation of the same read-only-query + citation-
+check logic `src/area`'s Python side already has and tests (W-B2/W-B4),
+not a Python subprocess -- same split model-bench itself uses between
+its Python eval harness and its own `web/api/run-one.js`.
+
+STATUS: Done. `vercel build` passes locally. Not deployed (rule: no
+`vercel deploy` this session).
+
+BUILT:
+- `web/lib/guardrail.js` — JS port of `src/area/tools/query_tool.py`'s
+  guardrail (same allow-listed tables/views, same 4 rejection shapes:
+  non-SELECT, semicolon-chained statement, non-allow-listed table, no
+  LIMIT auto-added) -- regex/keyword-based, not a full parser (same
+  disclosed scope limit as the Python original's D15); `area_reader`'s
+  read-only role + statement_timeout is the real backstop either way.
+- `web/lib/citation.js` — JS port of `src/area/tools/citation_checker.py`
+  (marker format, 0.5% tolerance, year exclusion, D19's GLP-1 fix
+  carried over). Found and fixed the *same class* of bug live while
+  writing this port's own tests: a citation marker's own digits (e.g.
+  the "1" in "[q_1]") were being re-scanned as a second, uncited claimed
+  number. Ported the Python original's actual fix for this (marker-span
+  precomputation + skip any number match starting inside one,
+  `citation_checker.py`'s `_inside_a_marker`) rather than inventing a
+  different one.
+- `web/lib/bedrock.js` — Converse wrapper (same shape as model-bench's
+  `run-one.js`), defaults to `us.amazon.nova-lite-v1:0` (D18: Haiku/
+  Sonnet 4.5 blocked on Bedrock for this account).
+- `web/lib/db.js` — `pg` Pool wrapper, `DATABASE_URL` read at call time
+  (not import time), client injectable for tests.
+- `web/api/health.js` — real DB reachability + real `payments` row count
+  when configured; never fakes a value.
+- `web/api/facts.js` — the same 5 headline queries as `data/facts.md` /
+  `src/area/cli.py`'s `FACTS_QUERIES`, run live; per-fact honest error
+  instead of a placeholder on failure.
+- `web/api/ask.js` — SQL-generate -> guardrail -> execute -> compose ->
+  verify, same shape as `area.agent.loop.run_agent` (Python, W-B4) but
+  independently implemented in JS; returns `accepted`/`unverified` so
+  the front end (and any caller) can honor SPEC-area.md section 1's hard
+  gate itself.
+- `web/index.html` — a plain-JS front page: an ask box, a live facts
+  panel, a live health panel. No framework, no build step beyond
+  Vercel's own function bundling.
+- `web/package.json` — `@aws-sdk/client-bedrock-runtime`, `pg`; `node
+  --test` as the test runner (matches model-bench/web's own choice).
+- `web/tests/*.test.js` — 25 tests total (guardrail 8, citation 7,
+  health 3, facts 3, ask 4), all offline via injected `pool`/Bedrock
+  `client` mocks -- zero network, zero secrets, same discipline as the
+  Python side's tests.
+
+TESTED:
+- `node --test tests/` (from `web/`): **25/25 passed**.
+- `vercel build` (from `web/`, Vercel CLI 59.11.7, local, real): **build
+  succeeded** ("Build Completed in .vercel/output"). Not deployed.
+
+**Real finding, flagged for Leon**: running `vercel build` for the first
+time in this directory auto-created a *project link* to an existing
+Vercel project named plain "web" under the `giggit` team scope
+(`orgId team_VMW68eILolqlTRHeHfb9t7ZU`), and downloaded that project's
+preview environment variables to a local `.vercel/.env.preview.local`
+file in the process. That auto-link is almost certainly NOT the right
+target for AREA's `web/` (a generic name "web" strongly suggests it
+belongs to a different site/sibling repo in this same team, most likely
+model-bench's own `web/`, which uses the identical directory name) --
+deploying to it as-is risks overwriting an unrelated site. This session
+deleted the local `.vercel/` link (and the downloaded env file with it)
+rather than leave it in place or inspect/print its contents, and added
+`.vercel` to `web/.gitignore` (already present) so this can't be
+committed by accident. **Before ever running a real deploy**, run
+`vercel link` from `web/` by hand and explicitly pick or create the
+right project (e.g. a new "area" or "giggit-area" project), not
+whatever this auto-link would pick.
+
+EXACT DEPLOY COMMAND (documented, NOT run this session, per rule: no
+`vercel deploy`):
+```
+cd web
+vercel link         # pick/create the correct project by hand -- see the finding above
+vercel env add DATABASE_URL production
+vercel env add AWS_REGION production
+vercel env add AWS_ACCESS_KEY_ID production
+vercel env add AWS_SECRET_ACCESS_KEY production
+# optional -- defaults to us.amazon.nova-lite-v1:0 if unset (D18):
+vercel env add AREA_MODEL_ID production
+vercel build --prod
+vercel deploy --prebuilt --prod
+```
+Project setting names the deploy needs (Vercel dashboard, or the `vercel
+env add` calls above): `DATABASE_URL` (the real Neon connection string,
+`sslmode=require`), `AWS_REGION`, `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY` (Bedrock Converse access), and optionally
+`AREA_MODEL_ID` (Bedrock inference-profile model id, `us.`-prefixed).
+Root Directory (Project Settings -> General) must be set to `web` if the
+project is ever linked at the repo root instead of inside `web/`
+directly.
+
+OPEN: not deployed. The `/api/ask` and `/api/facts` real numbers will
+still read "no data"/PENDING-shaped output until the D17 pull (Open
+items, above) actually loads rows -- same honest-empty state as W-B4's
+real eval run, by the same design (never fabricate a number).
+
+NEXT: W-B3 (causal), then data/facts.md, per this session's own task
+order.
