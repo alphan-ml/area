@@ -69,14 +69,43 @@ def test_pull_reports_failure_and_returns_1(monkeypatch, capsys):
     assert "2023: FAILED: boom" in out
 
 
+def test_pull_stream_without_s3_bucket_returns_1(capsys):
+    exit_code = main(["pull", "--stream"])
+    assert exit_code == 1
+    assert "--s3-bucket" in capsys.readouterr().err
+
+
+def test_pull_stream_calls_pull_all_years_with_stream_kwargs(monkeypatch, capsys):
+    calls = []
+
+    def fake_pull_all_years(out_dir, years=None, force=False, stream=False, s3_bucket=None,
+                             database_url=None):
+        calls.append((stream, s3_bucket, database_url))
+        return [
+            {
+                "year": 2023, "complete": True, "rows_matched": 5, "rows_scanned": 20,
+                "error": None, "bytes": 1234, "s3_bucket": s3_bucket,
+                "s3_key": "raw/2023/foo.csv",
+            }
+        ]
+
+    monkeypatch.setattr(cli_module, "pull_all_years", fake_pull_all_years)
+    monkeypatch.setenv("DATABASE_URL", "postgresql://example/db")
+    exit_code = main(["pull", "--stream", "--s3-bucket", "giggit-area-raw-payments"])
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert calls == [(True, "giggit-area-raw-payments", "postgresql://example/db")]
+    assert "1234 bytes -> s3://giggit-area-raw-payments/raw/2023/foo.csv" in out
+
+
 def test_load_calls_ensure_schema_then_load_raw_dir(monkeypatch, capsys):
     calls = []
 
     def fake_ensure_schema(database_url, sql_paths):
         calls.append(("ensure_schema", database_url))
 
-    def fake_load_raw_dir(database_url, raw_dir, years=None):
-        calls.append(("load_raw_dir", database_url, raw_dir))
+    def fake_load_raw_dir(database_url, raw_dir, years=None, batch_size=None):
+        calls.append(("load_raw_dir", database_url, raw_dir, batch_size))
 
         class Stats:
             rows_upserted = 3
@@ -94,8 +123,33 @@ def test_load_calls_ensure_schema_then_load_raw_dir(monkeypatch, capsys):
     assert exit_code == 0
     assert calls[0] == ("ensure_schema", "postgresql://example/db")
     assert calls[1][0] == "load_raw_dir"
+    assert calls[1][3] is None  # --stream not passed -> batch_size stays None
     out = capsys.readouterr().out
     assert "loaded 3 rows" in out
+
+
+def test_load_stream_passes_batch_size(monkeypatch, capsys):
+    calls = []
+
+    monkeypatch.setattr(cli_module, "ensure_schema", lambda database_url, sql_paths: None)
+
+    def fake_load_raw_dir(database_url, raw_dir, years=None, batch_size=None):
+        calls.append(batch_size)
+
+        class Stats:
+            rows_upserted = 0
+            rows_skipped_bad = 0
+            years_loaded: list[int] = []
+            errors: list[str] = []
+
+        return Stats()
+
+    monkeypatch.setattr(cli_module, "load_raw_dir", fake_load_raw_dir)
+    exit_code = main(
+        ["load", "--database-url", "postgresql://example/db", "--stream", "--batch-size", "500"]
+    )
+    assert exit_code == 0
+    assert calls == [500]
 
 
 # --- tools-test (W-B2) ------------------------------------------------------
