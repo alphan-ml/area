@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AREA -- GLP-1 Payments Research Agent</title>
+<style>
+  body { font-family: -apple-system, system-ui, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #1a1a1a; }
+  h1 { font-size: 1.4rem; }
+  #answer, #facts, #health { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-top: 12px; white-space: pre-wrap; font-size: 0.92rem; }
+  input[type=text] { width: 100%; padding: 8px; box-sizing: border-box; }
+  button { padding: 8px 16px; margin-top: 8px; }
+  .accepted { color: #0a7d2c; }
+  .not-accepted { color: #b00020; }
+  .muted { color: #666; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<h1>AREA -- GLP-1 Manufacturer Payments Research Agent</h1>
+<p class="muted">Ask a question about CMS Open Payments data for GLP-1 drugs (Ozempic, Wegovy, Mounjaro, Zepbound, etc.). Every number in the answer is checked against its cited evidence before being shown as accepted.</p>
+
+<form id="ask-form">
+  <input type="text" id="question" placeholder="e.g. What was the total GLP-1 payment amount in 2021?" maxlength="500">
+  <button type="submit">Ask</button>
+</form>
+<div id="answer" class="muted">Ask a question to see a live, cited answer.</div>
+
+<h2>Headline facts</h2>
+<div id="facts" class="muted">Loading...</div>
+
+<h2>Service health</h2>
+<div id="health" class="muted">Loading...</div>
+
+<script>
+async function loadHealth() {
+  const el = document.getElementById('health');
+  try {
+    const r = await fetch('/api/health');
+    const j = await r.json();
+    el.textContent = JSON.stringify(j, null, 2);
+  } catch (e) {
+    el.textContent = 'health check failed: ' + e;
+  }
+}
+async function loadFacts() {
+  const el = document.getElementById('facts');
+  try {
+    const r = await fetch('/api/facts');
+    const j = await r.json();
+    el.textContent = JSON.stringify(j, null, 2);
+  } catch (e) {
+    el.textContent = 'facts check failed: ' + e;
+  }
+}
+document.getElementById('ask-form').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const question = document.getElementById('question').value.trim();
+  const el = document.getElementById('answer');
+  if (!question) return;
+  el.className = 'muted';
+  el.textContent = 'Thinking...';
+  try {
+    const r = await fetch('/api/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question }),
+    });
+    const j = await r.json();
+    if (!j.ok) {
+      el.className = 'not-accepted';
+      el.textContent = 'Error: ' + (j.error || 'unknown error');
+      return;
+    }
+    el.className = j.accepted ? 'accepted' : 'not-accepted';
+    el.textContent = (j.accepted ? '[ACCEPTED] ' : '[NOT ACCEPTED -- unverified number(s)] ') + j.answer;
+  } catch (e) {
+    el.className = 'not-accepted';
+    el.textContent = 'Request failed: ' + e;
+  }
+});
+loadHealth();
+loadFacts();
+</script>
+</body>
+</html>

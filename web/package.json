@@ -1,0 +1,17 @@
+{
+  "name": "area-web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AREA web/ (task W-B5): Vercel Node functions (/api/health, /api/facts, /api/ask) and a minimal front page. Same split as model-bench/web (this repo's sibling): Python never deploys here -- these functions call Bedrock (@aws-sdk/client-bedrock-runtime) and Postgres (pg) directly in JS, independent implementations of the same read-only-query + citation-check logic src/area's Python side already has and tests, not a Python subprocess.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.1131.0",
+    "pg": "^8.23.0"
+  }
+}
