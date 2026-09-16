@@ -1,0 +1,164 @@
+{
+  "question": "Which US state had physicians receiving the most GLP-1 manufacturer payment dollars?",
+  "model_id": "us.amazon.nova-lite-v1:0",
+  "adapter": "bedrock",
+  "steps": [
+    {
+      "kind": "plan",
+      "detail": {
+        "action": "tool_call",
+        "tool": "query_tool",
+        "args": {
+          "question": "Which US state had physicians receiving the most GLP-1 manufacturer payment dollars?"
+        }
+      }
+    },
+    {
+      "kind": "tool_call",
+      "detail": {
+        "tool": "query_tool",
+        "args": {
+          "question": "Which US state had physicians receiving the most GLP-1 manufacturer payment dollars?"
+        },
+        "ok": false,
+        "error": "query execution failed: relation \"payments\" does not exist\nLINE 2: FROM payments\n             ^",
+        "data": null
+      }
+    },
+    {
+      "kind": "plan",
+      "detail": {
+        "action": "tool_call",
+        "tool": "query_tool",
+        "args": {
+          "question": "Which US state had physicians receiving the most GLP-1 manufacturer payment dollars?"
+        }
+      }
+    },
+    {
+      "kind": "tool_call",
+      "detail": {
+        "tool": "query_tool",
+        "args": {
+          "question": "Which US state had physicians receiving the most GLP-1 manufacturer payment dollars?"
+        },
+        "ok": false,
+        "error": "query execution failed: relation \"payments\" does not exist\nLINE 2: FROM payments\n             ^",
+        "data": null
+      }
+    },
+    {
+      "kind": "plan",
+      "detail": {
+        "action": "tool_call",
+        "tool": "query_tool",
+        "args": {
+          "question": "Which US state had physicians receiving the most GLP-1 manufacturer payment dollars?"
+        }
+      }
+    },
+    {
+      "kind": "tool_call",
+      "detail": {
+        "tool": "query_tool",
+        "args": {
+          "question": "Which US state had physicians receiving the most GLP-1 manufacturer payment dollars?"
+        },
+        "ok": false,
+        "error": "query execution failed: relation \"payments\" does not exist\nLINE 2: FROM payments\n             ^",
+        "data": null
+      }
+    },
+    {
+      "kind": "plan",
+      "detail": {
+        "action": "tool_call",
+        "tool": "query_tool",
+        "args": {
+          "question": "Which US state had physicians receiving the most GLP-1 manufacturer payment dollars?",
+          "hint": "Use the q_by_state table to find the state with the highest total payments."
+        }
+      }
+    },
+    {
+      "kind": "tool_call",
+      "detail": {
+        "tool": "query_tool",
+        "args": {
+          "question": "Which US state had physicians receiving the most GLP-1 manufacturer payment dollars?",
+          "hint": "Use the q_by_state table to find the state with the highest total payments."
+        },
+        "ok": false,
+        "error": "query execution failed: relation \"q_by_state\" does not exist\nLINE 1: SELECT physician_state, total_usd FROM q_by_state ORDER BY t...\n                                               ^",
+        "data": null
+      }
+    },
+    {
+      "kind": "compose",
+      "detail": {
+        "answer_text": "No matching data is available yet."
+      }
+    },
+    {
+      "kind": "verify",
+      "detail": {
+        "accepted": true,
+        "unverified": []
+      }
+    }
+  ],
+  "calls": [
+    {
+      "adapter": "bedrock",
+      "input_tokens": 654,
+      "output_tokens": 41,
+      "latency_ms": 616.7718750075437,
+      "http_status": 200,
+      "retries": 0,
+      "error": null
+    },
+    {
+      "adapter": "bedrock",
+      "input_tokens": 678,
+      "output_tokens": 41,
+      "latency_ms": 569.2051670048386,
+      "http_status": 200,
+      "retries": 0,
+      "error": null
+    },
+    {
+      "adapter": "bedrock",
+      "input_tokens": 705,
+      "output_tokens": 41,
+      "latency_ms": 558.2541669718921,
+      "http_status": 200,
+      "retries": 0,
+      "error": null
+    },
+    {
+      "adapter": "bedrock",
+      "input_tokens": 732,
+      "output_tokens": 64,
+      "latency_ms": 658.5667079780251,
+      "http_status": 200,
+      "retries": 0,
+      "error": null
+    },
+    {
+      "adapter": "bedrock",
+      "input_tokens": 324,
+      "output_tokens": 8,
+      "latency_ms": 466.47395798936486,
+      "http_status": 200,
+      "retries": 0,
+      "error": null
+    }
+  ],
+  "evidence": [],
+  "answer_text": "No matching data is available yet.",
+  "accepted": true,
+  "unverified": [],
+  "error": null,
+  "input_tokens": 3093,
+  "output_tokens": 195
+}

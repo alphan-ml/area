@@ -296,3 +296,100 @@ def test_forecast_reports_computed_and_skipped_series(monkeypatch, tmp_path, cap
     assert "1 series computed, 1 skipped" in out
     assert "national: primary_model=ets" in out
     assert "specialty:Rare: SKIPPED -- only 3 quarters of data, need at least 8" in out
+
+
+# --- run / evals (W-B4) -------------------------------------------------
+
+
+def test_run_prints_accepted_answer_and_exits_0(monkeypatch, capsys):
+    from area.agent.loop import AgentTrace
+
+    def fake_run_agent(question, **kwargs):
+        assert question == 'q?'
+        trace = AgentTrace(question=question, model_id='m', adapter='fake')
+        trace.answer_text = 'A cited answer [q_x].'
+        trace.accepted = True
+        return trace
+
+    monkeypatch.setattr('area.agent.loop.run_agent', fake_run_agent)
+    exit_code = main(['run', 'q?'])
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert '[ACCEPTED]' in out
+    assert 'A cited answer [q_x].' in out
+
+
+def test_run_exits_1_when_answer_not_accepted(monkeypatch, capsys):
+    from area.agent.loop import AgentTrace
+
+    def fake_run_agent(question, **kwargs):
+        trace = AgentTrace(question=question, model_id='m', adapter='fake')
+        trace.answer_text = 'An uncited $5.'
+        trace.accepted = False
+        trace.unverified = ['$5']
+        return trace
+
+    monkeypatch.setattr('area.agent.loop.run_agent', fake_run_agent)
+    exit_code = main(['run', 'q?'])
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert 'NOT ACCEPTED' in captured.out
+    assert 'Unverified' in captured.err
+
+
+def test_run_reports_loop_error_and_exits_1(monkeypatch, capsys):
+    from area.agent.loop import AgentTrace
+
+    def fake_run_agent(question, **kwargs):
+        trace = AgentTrace(question=question, model_id='m', adapter='fake')
+        trace.error = 'planner call failed: boom'
+        return trace
+
+    monkeypatch.setattr('area.agent.loop.run_agent', fake_run_agent)
+    exit_code = main(['run', 'q?'])
+    err = capsys.readouterr().err
+    assert exit_code == 1
+    assert 'planner call failed: boom' in err
+
+
+def test_evals_reports_pass_count_and_writes_summary(monkeypatch, tmp_path, capsys):
+    from area.evals.runner import EvalCaseResult, EvalsSummary
+
+    def fake_run_evals(cases=None, **kwargs):
+        assert kwargs['trace_dir'] == tmp_path / 'traces'
+        summary = EvalsSummary(model_id='m', adapter='fake')
+        summary.results = [
+            EvalCaseResult(
+                case_id='c1', question='q1', passed=True, accepted=True, error=None,
+                answer_text='ok [e1]', input_tokens=10, output_tokens=5,
+                latency_ms=12.0, calls=2, trace_path=str(tmp_path / 'traces' / 'c1.json'),
+            ),
+            EvalCaseResult(
+                case_id='c2', question='q2', passed=False, accepted=False,
+                error='planner call failed: boom', answer_text=None,
+                input_tokens=3, output_tokens=0, latency_ms=4.0, calls=1, trace_path=None,
+            ),
+        ]
+        summary.started_at = 'a'
+        summary.finished_at = 'b'
+        return summary
+
+    monkeypatch.setattr('area.evals.runner.run_evals', fake_run_evals)
+    out_path = tmp_path / 'summary.json'
+    exit_code = main(
+        [
+            'evals',
+            '--trace-dir', str(tmp_path / 'traces'),
+            '--out-path', str(out_path),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert exit_code == 1  # not all cases passed
+    assert 'c1: PASS' in out
+    assert 'c2: FAIL' in out
+    assert '1/2 passed' in out
+    assert out_path.exists()
+    import json as _json
+    written = _json.loads(out_path.read_text())
+    assert written['passed'] == 1
+    assert written['total'] == 2
