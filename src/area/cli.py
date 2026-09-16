@@ -35,14 +35,13 @@ from pathlib import Path
 from area.load_neon import ensure_schema, load_raw_dir
 from area.pull_open_payments import YEARS, pull_all_years
 
-NOT_YET_BUILT = {
-    "causal": "W-B3",
-}
+NOT_YET_BUILT: dict = {}
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SQL_DIR = REPO_ROOT / "sql"
 SCHEMA_SQL_PATHS = [SQL_DIR / "001_schema.sql", SQL_DIR / "002_views.sql"]
 FORECAST_OUT_PATH = REPO_ROOT / "forecast" / "latest.json"
+CAUSAL_OUT_PATH = REPO_ROOT / "causal" / "latest.json"
 
 # The same 5 queries as data/facts.md (SPEC-area.md section 3.4), kept
 # deliberately in sync with that file: facts.md is the human-readable,
@@ -157,6 +156,15 @@ def _build_parser() -> argparse.ArgumentParser:
     evals_p.add_argument("--out-path", default=None)
     evals_p.add_argument("--input-price-per-1m", type=float, default=None)
     evals_p.add_argument("--output-price-per-1m", type=float, default=None)
+
+    causal_p = sub.add_parser(
+        "causal", help="Diff-in-diff over the loaded years (W-B3)"
+    )
+    causal_p.add_argument("--raw-dir", default="raw")
+    causal_p.add_argument("--out-path", default=None)
+    causal_p.add_argument("--event-quarter", default=None)
+    causal_p.add_argument("--year", type=int, action="append", dest="years")
+    causal_p.add_argument("--manufacturer", action="append", dest="manufacturers")
 
     for name, task in sorted(NOT_YET_BUILT.items()):
         sub.add_parser(name, help=f"(not built yet -- see SPEC-area.md task {task})")
@@ -460,6 +468,55 @@ def _run_evals(args: argparse.Namespace) -> int:
     return 0 if summary.passed == summary.total else 1
 
 
+def _run_causal(args: argparse.Namespace) -> int:
+    """area causal (W-B3): diff-in-diff over the loaded years. Prints the
+    real DiD estimate and the pre/post group means when there is enough
+    real data on both sides of the event quarter, or a plain, honest
+    reason when there is not -- never a fabricated number. See
+    area.causal.diff_in_diff.s module docstring for what the estimate
+    does and does not claim.
+    """
+    from area.causal.diff_in_diff import DEFAULT_TREATED_MANUFACTURERS
+    from area.causal.diff_in_diff import run as causal_run
+
+    raw_dir = Path(args.raw_dir)
+    out_path = Path(args.out_path) if args.out_path else CAUSAL_OUT_PATH
+    if not raw_dir.exists():
+        print(
+            f"area causal: {raw_dir} does not exist -- run `area pull` first "
+            "(or pass --raw-dir).",
+            file=sys.stderr,
+        )
+        return 1
+
+    treated_manufacturers = (
+        tuple(args.manufacturers) if args.manufacturers else DEFAULT_TREATED_MANUFACTURERS
+    )
+    result = causal_run(
+        raw_dir,
+        out_path,
+        treated_manufacturers=treated_manufacturers,
+        event_quarter=args.event_quarter,
+        years=args.years,
+    )
+    print(f"wrote {out_path}")
+    if not result["ok"]:
+        print(f"NOT AVAILABLE -- {result['reason']}", file=sys.stderr)
+        return 1
+
+    print(f"treated manufacturers: {result['treated_manufacturers']}")
+    print(f"event quarter: {result['event_quarter']}")
+    print(f"quarters before: {result['quarters_before']}")
+    print(f"quarters after: {result['quarters_after']}")
+    print(f"treated mean before: {result['treated_mean_before_usd']:.2f} USD/quarter")
+    print(f"treated mean after: {result['treated_mean_after_usd']:.2f} USD/quarter")
+    print(f"control mean before: {result['control_mean_before_usd']:.2f} USD/quarter")
+    print(f"control mean after: {result['control_mean_after_usd']:.2f} USD/quarter")
+    print(f"diff-in-diff estimate: {result['diff_in_diff_usd']:.2f} USD/quarter")
+    print(result["parallel_trend_note"])
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -485,6 +542,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_run(args)
     if args.command == "evals":
         return _run_evals(args)
+    if args.command == "causal":
+        return _run_causal(args)
 
     parser.error(f"unknown command: {args.command}")
     return 2  # pragma: no cover -- parser.error() already exits

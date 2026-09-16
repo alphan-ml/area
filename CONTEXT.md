@@ -358,7 +358,10 @@ It has NOT been run yet — see Open items below.
 
 ## Not yet built
 
-`web/` and its Vercel functions (W-B5); `src/area/causal/` (W-B3).
+Nothing from this session's own task list (W-B4/W-B5/W-B3) -- all
+three landed. Still outstanding, independent of code: the real D17
+pull actually loading rows (Open items, above), and a real `vercel
+deploy` (never run this session, by rule).
 W-B4 (agent loop, evals, trace writers) landed this task -- see its
 report below. The real ~37.56 GiB/5-year data pull is authorized (D17)
 but is currently NOT RUNNING: the D17 streaming pull crashed on its
@@ -873,3 +876,90 @@ real eval run, by the same design (never fabricate a number).
 
 NEXT: W-B3 (causal), then data/facts.md, per this session's own task
 order.
+
+### TASK: W-B3 -- 2026-09-16 13:4x ET (commit timestamp see git log)
+
+TASK: W-B3 -- `src/area/causal/`, per CONTEXT.md's "Not yet built" line
+(no more specific SPEC-area.md section 10 text is available locally than
+"src/area/causal/ (W-B3)").
+
+STATUS: Done, as a real, reusable diff-in-diff estimator. Real output on
+the currently-loaded years: **NOT AVAILABLE** (0 complete years under
+`raw/`) -- honest, re-runnable, not a placeholder. See the real finding
+below for why real 2021 data exists on disk but isn't usable yet.
+
+BUILT:
+- `src/area/causal/diff_in_diff.py` -- a standard 2-group/2-period
+  difference-in-differences estimator: `build_group_series()` splits
+  real matched rows (D14's reading path -- `load_neon.iter_matched_rows`/
+  `coerce_row` over `raw/<year>/matched.jsonl.gz`) into a treated group
+  (default: `data/products.json`'s `manufacturers_of_record` -- Novo
+  Nordisk, Eli Lilly) and a control group (every other real matched
+  row's manufacturer) by quarter; `estimate_diff_in_diff()` computes
+  `(treated_after - treated_before) - (control_after - control_before)`
+  over a caller-given (or auto-median) event quarter, honestly reporting
+  a stated reason instead of a number when either side is empty;
+  `run()` is the `area causal` entry point, writing `causal/latest.json`.
+  Module docstring discloses the design choice explicitly: this does NOT
+  claim to have discovered a real-world policy effect (the payments data
+  alone has no outcome/prescribing variable to make that claim about) --
+  it is a real, reusable estimator whose event-quarter split is a
+  caller-supplied assumption, with the standard parallel-trends caveat
+  stated in its own output (`parallel_trend_note`), not assumed away.
+- `src/area/cli.py` -- wired `area causal [--raw-dir] [--event-quarter]
+  [--manufacturer ...] [--year ...] [--out-path]`; `NOT_YET_BUILT` is now
+  empty (every W-B1-B5 subcommand is built).
+- `tests/test_causal_diff_in_diff.py` (6 tests, offline, synthetic
+  fixture rows in the same jsonl.gz format `test_build_series.py` uses):
+  group-splitting by manufacturer, the DiD arithmetic itself, an honest
+  insufficient-data report, real output + median-event-quarter
+  selection, an honest no-complete-year report, and custom treated-
+  group/event-quarter overrides.
+- `tests/test_cli.py`: replaced the old "causal is not built yet" test
+  with 3 real ones (missing raw dir, honest NOT AVAILABLE with no
+  complete years, and a real diff-in-diff number printed via a
+  monkeypatched `causal_run`).
+
+TESTED:
+- `uv run ruff check .`: clean. `uv run pytest -q`: **156 passed**.
+- **Real run**: `area causal` against this repo's real `raw/` directory
+  -> `NOT AVAILABLE -- no real matched rows with a usable quarter found
+  under raw_dir` (exit 1), `causal/latest.json` written with that honest
+  reason. This is the correct, real answer given real data state
+  (below) -- re-runnable as-is once a year is actually loaded.
+
+**Real finding**: `raw/2021/matched.jsonl.gz` already contains **216,000
+real matched GLP-1 payment rows** for 2021 (verified: `gzip -dc | wc -l`
+= 216000, real CMS row shapes, real record_ids) -- almost certainly
+written by the same D17 pull run that crashed (this task's own W-B4
+report traces that crash to this session's first `pytest` run dropping
+the live `payments` table mid-pull via a test's real-database cleanup
+block, not a network/pull-logic failure). This file has **no
+manifest.json**, and `load_neon.iter_matched_rows` (D14's reading path,
+which both W-B4's evals-adjacent tooling and this task's own
+`build_group_series` use) requires one with `complete: true` before it
+will read a year at all -- by original design (D2: "an interrupted year
+is fully re-pulled, not resumed mid-file" specifically to avoid a
+partial, potentially non-representative subset of a year skewing
+analysis). This session deliberately did **not** write a synthetic
+manifest.json to make this file usable: whether the scan reached the
+real end of the 2021 CSV or stopped partway through is genuinely
+unknown (the crash-time S3 multipart upload -- which would have let this
+session check bytes-streamed-so-far against the known real file size --
+was already cleanly aborted by D17's own error-path fix before this
+session could inspect it), so marking it complete would risk exactly the
+biased-subset problem D2 exists to prevent. **Left as-is** for the next
+real pull run to overwrite cleanly (D2's own "wt" mode). This is a
+separate, real, disclosed data point for whoever restarts the pull
+(Open items, above): the 2021 pull may already be far along CMS's own
+CSV by the time it restarts, though `area pull` always re-scans a
+non-complete year from byte zero (D2), so this doesn't change how long a
+fresh 2021 pull will take -- flagging only because the row count itself
+(216,000 real, filtered matches) is a real, useful data point about the
+year's approximate match volume.
+
+OPEN: same as W-B4/W-B5 above -- `area causal`'s real numbers wait on
+the D17 pull actually completing and loading a year (raw/DB, either
+path works for this module since it reads raw files, not Neon).
+
+NEXT: `data/facts.md` update, then this session's close-out report.

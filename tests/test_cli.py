@@ -22,15 +22,47 @@ import area.cli as cli_module
 from area.cli import main
 
 
-def test_causal_not_yet_built_command_returns_1_and_names_the_task(capsys):
-    # "causal" (W-B3) has no module yet; "run"/"evals" (W-B4) are the same
-    # NOT_YET_BUILT path. tools-test/forecast (W-B2) are built now -- see
-    # the tests below.
-    exit_code = main(["causal"])
+def test_causal_missing_raw_dir_returns_1(tmp_path, capsys):
+    exit_code = main(["causal", "--raw-dir", str(tmp_path / "does-not-exist")])
     assert exit_code == 1
-    err = capsys.readouterr().err
-    assert "not built yet" in err
-    assert "W-B3" in err
+    assert "does not exist" in capsys.readouterr().err
+
+
+def test_causal_reports_not_available_when_no_complete_years_exist(tmp_path, capsys):
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    exit_code = main(["causal", "--raw-dir", str(raw_dir), "--out-path", str(tmp_path / "c.json")])
+    assert exit_code == 1
+    assert "NOT AVAILABLE" in capsys.readouterr().err
+
+
+def test_causal_reports_real_diff_in_diff_estimate(monkeypatch, tmp_path, capsys):
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    out_path = tmp_path / "causal" / "latest.json"
+
+    def fake_causal_run(raw_dir_arg, out_path_arg, *, treated_manufacturers, event_quarter, years):
+        assert raw_dir_arg == raw_dir
+        assert out_path_arg == out_path
+        return {
+            "ok": True,
+            "event_quarter": "2021Q3",
+            "quarters_before": ["2021Q1", "2021Q2"],
+            "quarters_after": ["2021Q3", "2021Q4"],
+            "treated_mean_before_usd": 100.0,
+            "treated_mean_after_usd": 150.0,
+            "control_mean_before_usd": 50.0,
+            "control_mean_after_usd": 60.0,
+            "diff_in_diff_usd": 40.0,
+            "treated_manufacturers": ["Novo Nordisk", "Eli Lilly"],
+            "parallel_trend_note": "see docstring",
+        }
+
+    monkeypatch.setattr("area.causal.diff_in_diff.run", fake_causal_run)
+    exit_code = main(["causal", "--raw-dir", str(raw_dir), "--out-path", str(out_path)])
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "diff-in-diff estimate: 40.00 USD/quarter" in out
 
 
 def test_load_without_database_url_returns_1(monkeypatch, capsys):
