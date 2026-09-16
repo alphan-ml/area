@@ -1,0 +1,8 @@
+{
+  "ok": false,
+  "reason": "no real matched rows with a usable quarter found under raw_dir -- run area pull / area load first",
+  "treated_manufacturers": [
+    "Novo Nordisk",
+    "Eli Lilly"
+  ]
+}
