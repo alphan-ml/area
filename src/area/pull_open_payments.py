@@ -544,6 +544,15 @@ def pull_year_stream(
                 time.sleep(
                     RETRY_BACKOFF_SECONDS[min(attempt - 1, len(RETRY_BACKOFF_SECONDS) - 1)]
                 )
+            except Exception:
+                # Anything else (a bad SQL/schema error, a bug) is not a
+                # transient network error worth retrying -- but it must
+                # still not leave an orphaned S3 multipart upload behind.
+                # Abort the upload, then let the real error propagate and
+                # crash loudly (never silently swallow a real bug).
+                if tee is not None:
+                    tee.abort()
+                raise
     finally:
         if conn is not None:
             conn.close()

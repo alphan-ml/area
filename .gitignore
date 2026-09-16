@@ -20,3 +20,6 @@ node_modules/
 raw/*/*.jsonl.gz
 raw/*/*.json.gz
 !raw/*/manifest.json
+
+# Background-run logs (nohup > outputs/<stage>.log), not part of the repo.
+outputs/
