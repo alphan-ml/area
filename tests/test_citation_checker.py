@@ -99,3 +99,22 @@ def test_run_tool_entry_point_never_raises_on_bad_input():
     result = run({"answer_text": "$5 [q_1]", "evidence": [{"evidence_id": "q_1"}]})
     assert result.ok is True
     assert result.data["accepted"] is False
+
+
+def test_glp_1_product_name_suffix_is_not_treated_as_an_uncited_number():
+    # Found for real running area evals (task W-B4, CONTEXT.md D19) against
+    # a live Bedrock composer answer that mentioned "GLP-1" with no other
+    # digits in it -- the old bare_int alternative had no left boundary, so
+    # it matched the "1" glued onto "GLP-" and flagged it as an uncited
+    # claim.
+    result = check("No matching data is available yet for GLP-1 records.", [])
+    assert result.accepted is True
+    assert result.numbers == []
+
+
+def test_number_immediately_after_a_word_is_still_caught_when_uncited():
+    # The GLP-1 guard must not blanket-exempt every letter-adjacent digit --
+    # a real uncited number in that shape should still fail.
+    result = check("Model v2 reported total 42 with no citation.", [])
+    assert result.accepted is False
+    assert any(n.raw_text == "42" for n in result.numbers)

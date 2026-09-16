@@ -1,0 +1,162 @@
+{
+  "question": "What share of GLP-1 manufacturer payment dollars were categorized as Food and Beverage?",
+  "model_id": "us.amazon.nova-lite-v1:0",
+  "adapter": "bedrock",
+  "steps": [
+    {
+      "kind": "plan",
+      "detail": {
+        "action": "tool_call",
+        "tool": "query_tool",
+        "args": {
+          "question": "What share of GLP-1 manufacturer payment dollars were categorized as Food and Beverage?"
+        }
+      }
+    },
+    {
+      "kind": "tool_call",
+      "detail": {
+        "tool": "query_tool",
+        "args": {
+          "question": "What share of GLP-1 manufacturer payment dollars were categorized as Food and Beverage?"
+        },
+        "ok": false,
+        "error": "query execution failed: relation \"payments\" does not exist\nLINE 5:     payments\n            ^",
+        "data": null
+      }
+    },
+    {
+      "kind": "plan",
+      "detail": {
+        "action": "tool_call",
+        "tool": "query_tool",
+        "args": {
+          "question": "What share of GLP-1 manufacturer payment dollars were categorized as Food and Beverage?"
+        }
+      }
+    },
+    {
+      "kind": "tool_call",
+      "detail": {
+        "tool": "query_tool",
+        "args": {
+          "question": "What share of GLP-1 manufacturer payment dollars were categorized as Food and Beverage?"
+        },
+        "ok": false,
+        "error": "query execution failed: relation \"payments\" does not exist\nLINE 4:     payments\n            ^",
+        "data": null
+      }
+    },
+    {
+      "kind": "plan",
+      "detail": {
+        "action": "tool_call",
+        "tool": "query_tool",
+        "args": {
+          "question": "What share of GLP-1 manufacturer payment dollars were categorized as Food and Beverage?"
+        }
+      }
+    },
+    {
+      "kind": "tool_call",
+      "detail": {
+        "tool": "query_tool",
+        "args": {
+          "question": "What share of GLP-1 manufacturer payment dollars were categorized as Food and Beverage?"
+        },
+        "ok": false,
+        "error": "query execution failed: relation \"payments\" does not exist\nLINE 4:     payments\n            ^",
+        "data": null
+      }
+    },
+    {
+      "kind": "plan",
+      "detail": {
+        "action": "tool_call",
+        "tool": "query_tool",
+        "args": {
+          "question": "What share of GLP-1 manufacturer payment dollars were categorized as Food and Beverage?"
+        }
+      }
+    },
+    {
+      "kind": "tool_call",
+      "detail": {
+        "tool": "query_tool",
+        "args": {
+          "question": "What share of GLP-1 manufacturer payment dollars were categorized as Food and Beverage?"
+        },
+        "ok": false,
+        "error": "query execution failed: relation \"payments\" does not exist\nLINE 4:     payments\n            ^",
+        "data": null
+      }
+    },
+    {
+      "kind": "compose",
+      "detail": {
+        "answer_text": "No matching data is available yet."
+      }
+    },
+    {
+      "kind": "verify",
+      "detail": {
+        "accepted": true,
+        "unverified": []
+      }
+    }
+  ],
+  "calls": [
+    {
+      "adapter": "bedrock",
+      "input_tokens": 655,
+      "output_tokens": 42,
+      "latency_ms": 619.1869999747723,
+      "http_status": 200,
+      "retries": 0,
+      "error": null
+    },
+    {
+      "adapter": "bedrock",
+      "input_tokens": 679,
+      "output_tokens": 42,
+      "latency_ms": 510.9694999991916,
+      "http_status": 200,
+      "retries": 0,
+      "error": null
+    },
+    {
+      "adapter": "bedrock",
+      "input_tokens": 706,
+      "output_tokens": 42,
+      "latency_ms": 430.4555000271648,
+      "http_status": 200,
+      "retries": 0,
+      "error": null
+    },
+    {
+      "adapter": "bedrock",
+      "input_tokens": 733,
+      "output_tokens": 42,
+      "latency_ms": 604.6837919857353,
+      "http_status": 200,
+      "retries": 0,
+      "error": null
+    },
+    {
+      "adapter": "bedrock",
+      "input_tokens": 303,
+      "output_tokens": 8,
+      "latency_ms": 365.7677499577403,
+      "http_status": 200,
+      "retries": 0,
+      "error": null
+    }
+  ],
+  "evidence": [],
+  "answer_text": "No matching data is available yet.",
+  "accepted": true,
+  "unverified": [],
+  "error": null,
+  "input_tokens": 3076,
+  "output_tokens": 176
+}

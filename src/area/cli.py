@@ -27,6 +27,7 @@ locally-complete but not-yet-fully-mirrored matched file.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -35,8 +36,6 @@ from area.load_neon import ensure_schema, load_raw_dir
 from area.pull_open_payments import YEARS, pull_all_years
 
 NOT_YET_BUILT = {
-    "run": "W-B4",
-    "evals": "W-B4",
     "causal": "W-B3",
 }
 
@@ -138,6 +137,26 @@ def _build_parser() -> argparse.ArgumentParser:
     forecast_p.add_argument("--raw-dir", default="raw")
     forecast_p.add_argument("--out-path", default=None)
     forecast_p.add_argument("--top-n-specialties", type=int, default=5)
+
+    run_p = sub.add_parser(
+        "run", help="Answer one research question via the agent loop (W-B4)"
+    )
+    run_p.add_argument("question")
+    run_p.add_argument("--database-url", default=None)
+    run_p.add_argument("--model-id", default=None)
+    run_p.add_argument("--adapter", default=None)
+    run_p.add_argument("--trace-path", default=None)
+
+    evals_p = sub.add_parser(
+        "evals", help="Run the fixed eval question set through the agent loop (W-B4)"
+    )
+    evals_p.add_argument("--database-url", default=None)
+    evals_p.add_argument("--model-id", default=None)
+    evals_p.add_argument("--adapter", default=None)
+    evals_p.add_argument("--trace-dir", default=None)
+    evals_p.add_argument("--out-path", default=None)
+    evals_p.add_argument("--input-price-per-1m", type=float, default=None)
+    evals_p.add_argument("--output-price-per-1m", type=float, default=None)
 
     for name, task in sorted(NOT_YET_BUILT.items()):
         sub.add_parser(name, help=f"(not built yet -- see SPEC-area.md task {task})")
@@ -361,6 +380,86 @@ def _run_forecast(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_run(args: argparse.Namespace) -> int:
+    """`area run "<question>"` (W-B4): runs the agent loop for real --
+    real provider (AREA_ADAPTER, default bedrock), real tool registry,
+    real database when one is configured -- and prints the composed
+    answer with its citation-verification status. Exit code reflects
+    acceptance, not just "the loop ran": an unverified answer exits 1,
+    per SPEC-area.md section 1.s hard gate (never show an uncited
+    number as if it were trustworthy).
+    """
+    from area.agent.loop import run_agent
+    from area.evals.traces import write_trace
+
+    database_url = args.database_url or os.environ.get("DATABASE_URL")
+    trace = run_agent(
+        args.question,
+        database_url=database_url,
+        model_id=args.model_id,
+        adapter=args.adapter,
+    )
+    if args.trace_path:
+        written = write_trace(trace, Path(args.trace_path))
+        print(f"trace written to {written}")
+
+    if trace.error:
+        print(f"ERROR: {trace.error}", file=sys.stderr)
+        return 1
+
+    status = "ACCEPTED" if trace.accepted else "NOT ACCEPTED -- unverified number(s)"
+    print(f"[{status}]")
+    print(trace.answer_text or "(no answer text)")
+    if not trace.accepted and trace.unverified:
+        print("Unverified: " + ", ".join(trace.unverified), file=sys.stderr)
+    print(
+        f"tokens: {trace.input_tokens} in / {trace.output_tokens} out -- "
+        f"model={trace.model_id} adapter={trace.adapter}"
+    )
+    return 0 if trace.accepted else 1
+
+
+def _run_evals(args: argparse.Namespace) -> int:
+    """`area evals` (W-B4): runs the fixed CASES set through the agent
+    loop for real, writes one trace file per case plus a summary.json,
+    and prints per-case PASS/FAIL and real token/latency totals. See
+    area.evals.runner.run_evals.s own docstring for what "passed" means
+    (citation-verified, never a fabricated number).
+    """
+    from area.evals.runner import run_evals
+
+    database_url = args.database_url or os.environ.get("DATABASE_URL")
+    trace_dir = Path(args.trace_dir) if args.trace_dir else (REPO_ROOT / "evals" / "traces")
+    summary = run_evals(
+        database_url=database_url,
+        model_id=args.model_id,
+        adapter=args.adapter,
+        trace_dir=trace_dir,
+        input_price_per_1m=args.input_price_per_1m,
+        output_price_per_1m=args.output_price_per_1m,
+    )
+    for r in summary.results:
+        status = "PASS" if r.passed else "FAIL"
+        detail = r.error or (r.answer_text or "")[:120]
+        print(
+            f"  {r.case_id}: {status} ({r.input_tokens}in/{r.output_tokens}out tok, "
+            f"{r.latency_ms:.0f}ms) -- {detail}"
+        )
+    print()
+    cost = summary.total_cost_usd()
+    cost_str = f"${cost:.4f}" if cost is not None else "not priced (no --input/output-price-per-1m)"
+    print(
+        f"{summary.passed}/{summary.total} passed -- "
+        f"{summary.total_input_tokens} in / {summary.total_output_tokens} out tokens, "
+        f"cost={cost_str}, model={summary.model_id} adapter={summary.adapter}"
+    )
+    out_path = Path(args.out_path) if args.out_path else (REPO_ROOT / "evals" / "summary.json")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(summary.to_dict(), indent=2, default=str))
+    print(f"summary written to {out_path}")
+    return 0 if summary.passed == summary.total else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -382,6 +481,10 @@ def main(argv: list[str] | None = None) -> int:
         return _run_tools_test(args)
     if args.command == "forecast":
         return _run_forecast(args)
+    if args.command == "run":
+        return _run_run(args)
+    if args.command == "evals":
+        return _run_evals(args)
 
     parser.error(f"unknown command: {args.command}")
     return 2  # pragma: no cover -- parser.error() already exits

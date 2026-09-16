@@ -49,7 +49,15 @@ _NUMBER_PATTERN = re.compile(
     r"(?P<currency>\$\d[\d,]*(?:\.\d+)?)"
     r"|(?P<comma_count>\d{1,3}(?:,\d{3})+(?:\.\d+)?%?)"
     r"|(?P<plain_decimal>\d+\.\d+%?)"
-    r"|(?P<bare_int>\d+%?)"
+    # (?<![A-Za-z-]) excludes a digit glued onto a preceding letter/hyphen,
+    # e.g. the "1" in "GLP-1" (a product-name suffix, not a claimed
+    # number) -- found for real running area evals (task W-B4) against a
+    # live Bedrock composer answer that mentioned "GLP-1" with no other
+    # number in it, which this pattern was otherwise flagging as an
+    # uncited claim. Currency/comma/decimal forms already can't collide
+    # with a product-name suffix (no $, comma, or decimal point in one),
+    # so only bare_int needs the guard.
+    r"|(?<![A-Za-z-])(?P<bare_int>\d+%?)"
 )
 _MARKER_PATTERN = re.compile(r"\s*\[([A-Za-z0-9_\-]+)\]")
 _MARKER_SPAN_PATTERN = re.compile(r"\[[A-Za-z0-9_\-]+\]")
