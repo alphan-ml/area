@@ -3,8 +3,11 @@
 v0 instance: GLP-1 manufacturer payments to U.S. clinicians, built from CMS
 Open Payments' public "general payments" dataset, program years 2021–2025.
 Full spec: `SPEC-area.md` (Drive HQ). This README documents what is
-**actually built so far** (tasks W-B1, W-B2); see `CONTEXT.md` for the
-decision log, open items, and per-task reports.
+**actually built** in the tree today (data layer, tools, forecast, causal
+estimator, agent loop, evals, CLI, and the web app -- every task in the
+original v0 split, W-B1 through W-B5); see `CONTEXT.md` for the decision
+log, open items, and per-task reports, and "Evals status" below for why
+"built" still doesn't mean "verified against real data."
 
 ## How to run
 
@@ -25,93 +28,128 @@ Postgres — set `TEST_DATABASE_URL` (see `.env.example`) or they skip
 cleanly with a stated reason. CI (`.github/workflows/ci.yml`) runs them
 for real against a `postgres:16` service container on every push.
 
-## What's built (W-B1)
+## What's built
 
-- `data/products.json` — the GLP-1 product match list (generic names
-  `semaglutide`/`tirzepatide`; brand names `Ozempic`, `Wegovy`,
-  `Rybelsus`, `Mounjaro`, `Zepbound`) and the case-insensitive substring
-  match rule against Open Payments' product name/category fields.
-  `src/area/match.py` implements it; `tests/test_products_match.py`
-  covers it.
-- `src/area/pull_open_payments.py` — pulls each program year's CMS Open
-  Payments general-payment data and filters it to the GLP-1 list,
-  streaming (never buffering a whole year's multi-GB file), writing
-  `raw/<year>/matched.jsonl.gz` + `raw/<year>/manifest.json`. Verified
-  against the REAL live public API (no key needed) — see "CMS Open
-  Payments dataset facts" below and `CONTEXT.md`'s decision log for how
-  the pull's actual design differs from the spec's literal
-  paginated-API wording, and why. `tests/test_pull_open_payments.py`
-  covers it fully offline via an injectable HTTP layer.
+Rewritten 2026-09-17 (task A1 part 2) directly from the tree, not from
+task history — each line was verified by reading the module it names.
+See `CONTEXT.md`'s per-task reports (W-B1 through W-B5) for how it got
+built, and "Evals status" below for the one thing that's built but not
+yet verified against real data.
+
+**Data layer**
+- `data/products.json` / `src/area/match.py` — the GLP-1 product match
+  list (generic names `semaglutide`/`tirzepatide`; brand names
+  `Ozempic`, `Wegovy`, `Rybelsus`, `Mounjaro`, `Zepbound`) and the
+  case-insensitive substring match rule against Open Payments' product
+  name/category fields.
+- `src/area/pull_open_payments.py` — streaming, resumable pull of each
+  CMS Open Payments program year, filtered to the GLP-1 list; verified
+  live against the real public API (see "CMS Open Payments dataset
+  facts" below). `pull_year_stream`/`_S3MultipartTee` additionally tee
+  the raw CSV to S3 while filtering it, so a year's raw multi-GB file is
+  never buffered whole on local disk (D17).
 - `sql/001_schema.sql` / `sql/002_views.sql` — the `payments` table, its
-  5 indexes, the read-only `area_reader` role, and the `q_totals` /
-  `q_by_specialty` / `q_by_state` aggregate views.
-- `src/area/load_neon.py` — loads `raw/<year>/matched.jsonl.gz` into the
-  `payments` table via upsert on `record_id`; re-running against the same
-  raw files changes nothing. `tests/test_load_idempotent.py` proves this
-  against a real Postgres, not a mock.
-- `data/facts.md` — the 5 headline SQL queries from spec section 3.4,
-  drafted and ready to run; every value is marked PENDING until the real
-  data pull (below) actually happens — see the note there on why no
-  placeholder numbers are written.
-- `src/area/cli.py` — `area pull` and `area load` (the two subcommands
-  this task's own modules implement); every other subcommand
-  (`tools-test`, `run`, `evals`, `forecast`, `causal`) prints a plain
-  "not built yet" message naming the task that adds it, instead of
-  failing to import.
+  5 indexes, the read-only `area_reader` role (10s statement timeout),
+  and the `q_totals`/`q_by_specialty`/`q_by_state` aggregate views.
+- `src/area/load_neon.py` — idempotent upsert-on-`record_id` loader from
+  `raw/<year>/matched.jsonl.gz` into `payments`; re-running it against
+  the same raw files changes nothing.
+- `data/facts.md` — the 5 headline SQL queries from spec section 3.4;
+  every value is still marked PENDING (no real pull has loaded rows —
+  see "Evals status" and CONTEXT.md's Open items).
 
-## What's built (W-B2)
+**Tools** (`src/area/tools/`, called by the agent loop below; registry in
+`src/area/tools/__init__.py`)
+- `query_tool.py` — question → model-generated SQL → validated
+  (`validate_and_normalize`: single `SELECT` only, allow-listed
+  tables/columns/functions only, `LIMIT 5000` enforced, multi-statement
+  chains rejected) → executed read-only → rows + `evidence_id`.
+- `forecast_tool.py` — a read-only lookup into `forecast/latest.json`;
+  never computes a forecast itself, and returns a clear error rather
+  than a fabricated number if the file or series doesn't exist yet.
+- `citation_checker.py` — checks every non-year number in a drafted
+  answer against its inline `[evidence_id]`/`[derivation_id]` marker,
+  matching cited evidence within tolerance (0.5% relative or displayed
+  precision) or recomputing a stated derivation with a restricted-AST
+  evaluator (never Python `eval`). This is `AgentTrace.accepted`'s hard
+  gate — see the agent loop below.
 
-- `src/area/providers/` — the same model-call provider layer as
-  model-bench (bedrock/anthropic_direct/openai_compatible/fake), vendored
-  with only the import namespace changed (per SPEC-area.md's own
-  instruction to copy or vendor it). `tests/test_providers.py` mirrors
-  model-bench's own provider tests: every network boundary is faked, never
-  real.
-- `src/area/tools/` — the three tools SPEC-area.md section 4 defines,
-  each a plain `(name, description, input_schema, fn)` `Tool` the later
-  agent loop (W-B4) will call, plus `registry()` (`tests/test_tools_registry.py`):
-  - `query_tool.py` — question → SQL (model-generated, injectable for
-    tests) → validated → executed read-only → rows + `evidence_id`. The
-    validator (`validate_and_normalize`) rejects anything that isn't
-    exactly one `SELECT`, any reference outside the allow-listed
-    tables/columns/functions, and multi-statement chains, and adds
-    `LIMIT 5000` when missing — defense-in-depth on top of
-    `sql/001_schema.sql`'s read-only `area_reader` role and its 10s
-    statement timeout (`CONTEXT.md` decision D15).
-    `tests/test_query_tool_guardrails.py` covers the validator with zero
-    secrets/network, plus two tests against a real scratch Postgres.
-  - `forecast_tool.py` — a read-only lookup into `forecast/latest.json`;
-    it never computes a forecast itself. Returns a clear error (never a
-    fabricated number) if that file or the requested series doesn't
-    exist yet. `tests/test_forecast_tool.py`.
-  - `citation_checker.py` — checks every non-year number in a drafted
-    answer against its inline `[evidence_id]`/`[derivation_id]` marker,
-    verifying it against the cited evidence payload (0.5% relative or
-    displayed-precision tolerance) or recomputing a stated derivation
-    expression with a restricted AST evaluator (never Python `eval`).
-    Wire format documented as `CONTEXT.md` decision D12.
-    `tests/test_citation_checker.py`.
-- `src/area/forecast/` — the forecast pipeline `area forecast` runs:
-  `models.py` (`seasonal_naive`, `ets`, both with an 80% interval —
-  `point ± 1.2816×residual_std`, `CONTEXT.md` decision D13),
-  `holdout.py` (train ≤2024Q4 / test 2025Q1–Q4, MAE + 80% coverage for
-  both models, picks the lower-MAE model as primary, writes
-  `forecast/latest.json`), and `build_series.py` (builds the national and
-  top-N-specialty quarterly series from raw pulled `matched.jsonl.gz`
-  files directly — not from Neon — since no database exists yet before
-  Gate 1; `CONTEXT.md` decision D14).
-  `tests/test_forecast_holdout.py`, `tests/test_build_series.py`.
-- `src/area/cli.py` additions — `area tools-test` (smoke-tests all three
-  tools and prints the 5 headline facts from `data/facts.md`, live
-  against a configured database, or an honest "NOT AVAILABLE"/"PENDING"
-  when one isn't configured — never a fake number) and `area forecast`
-  (runs the pipeline above end-to-end and writes `forecast/latest.json`).
+**Forecast** (`src/area/forecast/`)
+- `models.py` — `seasonal_naive` and `ets`, each with an 80% interval
+  (`point ± 1.2816×residual_std`).
+- `holdout.py` — trains through 2024Q4, tests 2025Q1–2025Q4, reports MAE
+  + 80% coverage for both models, picks the lower-MAE model as primary
+  per series, and writes `forecast/latest.json` (this is `area
+  forecast`'s entry point).
+- `build_series.py` — builds the national and top-N-specialty quarterly
+  series directly from raw pulled `matched.jsonl.gz` files (not from
+  Neon — no database exists to build from yet, D14).
 
-**Full-repo test status: 128/128 passed** (`python3 -m ruff check .` and
-`python3 -m pytest -q`), including real-Postgres tests for both the
-loader (W-B1) and the query tool (W-B2). See `CONTEXT.md`'s W-B2 report
-for the exact commands and honest disclosure of what still can't run for
-real (Gate 1: no database, no pulled data yet).
+**Causal** (`src/area/causal/diff_in_diff.py`) — a standard 2-group/
+2-period difference-in-differences estimator: splits real matched rows
+into a treated group (default: the manufacturers of record) and a
+control group by quarter, and computes `(treated_after - treated_before)
+- (control_after - control_before)` over a given or auto-median event
+quarter. States its own parallel-trends caveat in its output
+(`parallel_trend_note`) rather than assuming it away, and does not claim
+to have found a real-world policy effect — the payments data alone has
+no outcome variable to make that claim about (see the module's own
+docstring). This is `area causal`'s entry point.
+
+**Agent loop** (`src/area/agent/loop.py`) — `run_agent(question, ...)`: a
+bounded (`MAX_STEPS=4`) planner/actor/composer/verifier loop over the
+real tool registry. Every model call goes through `area.providers`; the
+composed answer is only marked `AgentTrace.accepted` after
+`citation_checker.check()` verifies it — per spec section 1's hard gate,
+an answer with an unverified number is never shown as trustworthy. This
+is `area run "<question>"`'s entry point.
+
+**Evals** (`src/area/evals/`)
+- `cases.py` — the 8 fixed real research questions (mirrors
+  `data/facts.md`'s 5 headline queries plus 3 more); each now also
+  carries a `gold` value (or `None` while unverified — see "Evals
+  status"), `expect_abstain`, `status`, and `parts` scoring metadata
+  (task A1).
+- `scoring.py` — the four independent per-question scores
+  (`correct`/`complete`/`retrieval_ok`/`abstained`) and the combined
+  `passed` rule (task A1) — see its own module docstring for the exact
+  rule and the three-valued logic behind "not scored."
+- `runner.py` — `run_evals()` (runs `CASES` through the real agent loop,
+  scores each with `scoring.score_case`, writes one trace file per case)
+  and `score_from_traces()` (re-scores already-written trace files with
+  no agent loop, model, or database call at all — `area evals
+  --from-traces`).
+- `traces.py` — `write_trace`/`read_trace`: one JSON file per run under
+  `evals/traces/<case_id>.json`.
+
+**Providers** (`src/area/providers/`) — the same model-call provider
+layer as model-bench (bedrock/anthropic_direct/openai_compatible/fake)
+behind one `Provider` interface, vendored with only the import namespace
+changed; every real network call goes through `call_with_retries`.
+
+**CLI** (`src/area/cli.py`) — `area pull|load|tools-test|forecast|run
+"<question>"|evals|causal`. Every subcommand in the original task split
+is wired; none prints a "not built yet" stub anymore.
+
+**Web** (`web/`) — an independent JS implementation of the read-only
+query + citation-check + facts logic (per model-bench's own
+`web/package.json` rule, "Python never deploys here" — this is not a
+Python subprocess): `lib/guardrail.js` and `lib/citation.js` port
+`query_tool.py`'s validator and `citation_checker.py`'s check;
+`lib/bedrock.js`/`lib/db.js` wrap Bedrock Converse and `pg`;
+`api/health.js`, `api/facts.js`, `api/ask.js` are the three Vercel
+functions; `index.html` is a plain-JS front page with no build step.
+`vercel build` passes locally; **not deployed** (see CONTEXT.md's W-B5
+report for the exact deploy command and a real finding about a stale
+auto-linked Vercel project that must not be deployed to as-is).
+
+**Full-repo test status (this session, 2026-09-17): 173 passed, 11
+skipped** (`uv run ruff check .` clean; `uv run pytest -q`) — up from
+128/128 at the last time this README was updated (W-B2). The 11 skips
+are the loader/query-tool tests that need a real scratch Postgres
+(`TEST_DATABASE_URL`, unset in this environment) and skip cleanly with a
+stated reason rather than silently passing; CI runs them for real
+against a `postgres:16` service container on every push.
 
 ## CMS Open Payments dataset facts (verified live, 2026-09-12)
 
@@ -144,17 +182,40 @@ resource-cost decision, not a code gap).
 `openpaymentsdata.cms.gov` and `download.cms.gov` are unreachable from
 this build environment's cloud workspace and from its Mac-VM sandbox
 shell (both return proxy 403s) but ARE reachable from a real, unrestricted
-network connection (verified from Leon's actual Mac). The real pull, when
+network connection (verified from the owner's actual Mac). The real pull, when
 it runs, needs to run somewhere with real network access to these hosts —
 see `CONTEXT.md`.
 
 ## Not yet built
 
-The agent loop (planner/actor/verifier), golden-set evals, trace writers
-(W-B4); the web page and its Vercel functions (W-B5); the causal
-estimator simulation (W-B3, Sunday). See `SPEC-area.md` section 10 for
-the full task split. Also still open regardless of task: the real CMS
-Open Payments pull, and the real Neon database — both explicitly
-deferred to Gate 1 (`CONTEXT.md` decision D11), so `area tools-test`'s
-query_tool/facts and `area forecast`'s series are honestly "NOT
-AVAILABLE"/"PENDING" until then, not fabricated.
+Rewritten 2026-09-17 (task A1 part 2): nothing from the original v0 task
+split (W-B1 through W-B5 — agent loop, evals, trace writers, the web
+page and its Vercel functions, the causal estimator) remains unbuilt in
+code; see "What's built" above for what each one actually does. What's
+still outstanding is data and deploy, not code:
+
+- The real ~37.56 GiB/5-year CMS Open Payments pull has not successfully
+  loaded any rows into Postgres (`CONTEXT.md`'s Open items) — `payments`
+  has 0 real rows, so `area tools-test`'s query_tool/facts, `area
+  forecast`'s series, `area causal`'s estimate, and every `area
+  evals`/`area run` answer above are all honestly "NOT AVAILABLE"/
+  "PENDING"/"no data available yet" rather than fabricated.
+- `web/` has never been `vercel deploy`'d (see its own "What's built"
+  entry above for the documented, not-yet-run deploy command).
+- Verified `gold` values for the 8 fixed eval questions in
+  `src/area/evals/cases.py` — see "Evals status" below.
+
+## Evals status
+
+`evals/summary.json` was regenerated this session (`area evals
+--from-traces`, task A1 part 1) under the new correctness/completeness/
+retrieval/abstention scoring in `src/area/evals/scoring.py`. It reports
+**0 passed, 8 not scored** — every one of the 8 fixed questions still has
+`gold: null` (no verified true value exists yet, because the real data
+pull above hasn't loaded rows), so none can be scored a pass under the
+new rule, even though every answer is an honest, citation-clean
+abstention. This summary **predates the real data load and counts as not
+passed** — it is not evidence the agent works, only that it fails safely
+with no data. The old summary this replaced reported "8/8 passed" under
+a rule that only checked for citation-clean text, which is exactly the
+gap this task closed.

@@ -156,6 +156,12 @@ def _build_parser() -> argparse.ArgumentParser:
     evals_p.add_argument("--out-path", default=None)
     evals_p.add_argument("--input-price-per-1m", type=float, default=None)
     evals_p.add_argument("--output-price-per-1m", type=float, default=None)
+    evals_p.add_argument(
+        "--from-traces",
+        action="store_true",
+        help="Score already-written trace files under --trace-dir instead of running "
+        "the agent loop for real -- no model call, no database (task A1 step 6).",
+    )
 
     causal_p = sub.add_parser(
         "causal", help="Diff-in-diff over the loaded years (W-B3)"
@@ -428,26 +434,39 @@ def _run_run(args: argparse.Namespace) -> int:
 
 
 def _run_evals(args: argparse.Namespace) -> int:
-    """`area evals` (W-B4): runs the fixed CASES set through the agent
-    loop for real, writes one trace file per case plus a summary.json,
-    and prints per-case PASS/FAIL and real token/latency totals. See
-    area.evals.runner.run_evals.s own docstring for what "passed" means
-    (citation-verified, never a fabricated number).
+    """`area evals` (W-B4; scoring rewritten task A1 part 1): runs the
+    fixed CASES set through the agent loop for real (or, with
+    `--from-traces`, re-scores already-written trace files with no agent
+    loop/database call at all), writes one trace file per case plus a
+    summary.json, and prints per-case PASS/FAIL/NOT SCORED and real
+    token/latency totals. See area.evals.scoring's own docstring for what
+    "passed" means now: correct-and-retrieved, or a correct abstention --
+    never just "the loop didn't error."
     """
-    from area.evals.runner import run_evals
-
-    database_url = args.database_url or os.environ.get("DATABASE_URL")
     trace_dir = Path(args.trace_dir) if args.trace_dir else (REPO_ROOT / "evals" / "traces")
-    summary = run_evals(
-        database_url=database_url,
-        model_id=args.model_id,
-        adapter=args.adapter,
-        trace_dir=trace_dir,
-        input_price_per_1m=args.input_price_per_1m,
-        output_price_per_1m=args.output_price_per_1m,
-    )
+    if args.from_traces:
+        from area.evals.runner import score_from_traces
+
+        summary = score_from_traces(trace_dir=trace_dir)
+    else:
+        from area.evals.runner import run_evals
+
+        database_url = args.database_url or os.environ.get("DATABASE_URL")
+        summary = run_evals(
+            database_url=database_url,
+            model_id=args.model_id,
+            adapter=args.adapter,
+            trace_dir=trace_dir,
+            input_price_per_1m=args.input_price_per_1m,
+            output_price_per_1m=args.output_price_per_1m,
+        )
     for r in summary.results:
-        status = "PASS" if r.passed else "FAIL"
+        if r.passed is True:
+            status = "PASS"
+        elif r.passed is None:
+            status = "NOT SCORED"
+        else:
+            status = "FAIL"
         detail = r.error or (r.answer_text or "")[:120]
         print(
             f"  {r.case_id}: {status} ({r.input_tokens}in/{r.output_tokens}out tok, "
@@ -457,7 +476,8 @@ def _run_evals(args: argparse.Namespace) -> int:
     cost = summary.total_cost_usd()
     cost_str = f"${cost:.4f}" if cost is not None else "not priced (no --input/output-price-per-1m)"
     print(
-        f"{summary.passed}/{summary.total} passed -- "
+        f"{summary.passed}/{summary.total} passed "
+        f"({summary.failed} failed, {summary.not_scored} not scored) -- "
         f"{summary.total_input_tokens} in / {summary.total_output_tokens} out tokens, "
         f"cost={cost_str}, model={summary.model_id} adapter={summary.adapter}"
     )
