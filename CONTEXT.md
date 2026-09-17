@@ -55,8 +55,8 @@ runs (spec section 3.2), or by re-running the same live verification
 sandbox shell — confirmed again today (cloud workspace: `curl` to the
 metastore endpoint returned `CONNECT tunnel failed, response 403` at
 2026-09-12 ~23:08 UTC). They ARE reachable from a real, unrestricted
-network connection — the table above was captured live from Leon's actual
-Mac terminal (via the `Control_your_Mac` osascript tool, not the sandboxed
+network connection — the table above was captured live from the owner's
+actual Mac terminal (via the `Control_your_Mac` osascript tool, not the sandboxed
 Mac-VM `device_bash` shell, which is a separate, also-blocked
 environment). Model-bench's own CONTEXT.md previously listed
 `openpaymentsdata.cms.gov` as blocked "per Fable's measurement" without
@@ -65,7 +65,7 @@ too (see model-bench's CONTEXT.md).
 
 **Practical consequence**: the real ~37.56 GiB / 5-year pull (§10, task
 W-B1) can only run from a machine with genuine network access to these
-two hosts — i.e. Leon's real Mac, not this build environment's sandboxes.
+two hosts — i.e. the owner's real Mac, not this build environment's sandboxes.
 It has NOT been run yet — see Open items below.
 
 ## Decisions
@@ -160,15 +160,16 @@ It has NOT been run yet — see Open items below.
   order-of-magnitude guess here would violate the BUILD INSTRUCTION's
   "no fake/invented numbers, ever" rule.
 
-- D11 — 2026-09-12 — **Leon's decision: the real ~37.56 GiB / 5-year CMS
-  pull waits for Gate 1** (asked directly in chat after the W-B1 report;
-  options were "run it now", "run one year first", or "wait until Gate
-  1" — Leon chose the third). Reason given by the option itself: once
-  S3/Neon credentials exist, the real data can go straight into
-  permanent storage instead of sitting on his Mac first. This replaces
-  the earlier "needs Leon's go-ahead" open item below with a settled
-  plan — no pull runs until Gate 1 is reached, at which point it needs
-  its own confirmation to start (not an automatic trigger).
+- D11 — 2026-09-12 — **The owner's decision: the real ~37.56 GiB / 5-year
+  CMS pull waits for Gate 1** (asked directly in chat after the W-B1
+  report; options were "run it now", "run one year first", or "wait
+  until Gate 1" — the owner chose the third). Reason given by the option
+  itself: once S3/Neon credentials exist, the real data can go straight
+  into permanent storage instead of sitting on the owner's Mac first.
+  This replaces the earlier "needs the owner's go-ahead" open item below
+  with a settled plan — no pull runs until Gate 1 is reached, at which
+  point it needs its own confirmation to start (not an automatic
+  trigger).
 
 - D12 — 2026-09-13 — **Disclosed judgment call, citation-marker wire
   format (W-B2)**: SPEC-area.md §4.4/§5.3 describe the citation-checker's
@@ -300,7 +301,56 @@ It has NOT been run yet — see Open items below.
   after a word (e.g. "total 42") is still caught, so the guard doesn't
   blanket-exempt every letter-adjacent digit.
 
-## Open items (blocked on Leon)
+- D20 -- 2026-09-17 -- **Eval scoring rewritten: "no error and cited"
+  no longer means "passed" (task A1 part 1)**. `evals/summary.json`
+  reported "8/8 passed" for every committed trace even though all 8
+  answers are "No matching data is available yet." -- the old rule
+  (`src/area/evals/runner.py`'s `passed = trace.error is None and
+  trace.accepted`) only checked that the loop didn't error and
+  `citation_checker` had nothing uncited to reject, which an honest
+  abstention satisfies trivially. That made the evals harness structurally
+  unable to ever catch a real agent regression once real data loads: an
+  agent that gave up and abstained on every question would keep
+  reporting 8/8 passed forever.
+
+  Fixed: `src/area/evals/scoring.py` now scores each case on four
+  independent axes -- `correct` (a number in the answer within `gold`'s
+  tolerance), `complete` (a documented, simple heuristic -- see its own
+  docstring), `retrieval_ok` (the trace's actually-executed SQL, if any
+  was recorded, touches the expected table/columns), and `abstained`
+  (matches a short explicit phrase list) -- combined via `passed =
+  (correct and retrieval_ok) or (abstained and expect_abstain)`,
+  evaluated in three-valued (Kleene) logic so a case with no verified
+  `gold` value yet reports `passed: null` ("not scored"), never `True`.
+  `src/area/evals/cases.py`'s `EvalCase` gained `gold`/`expect_abstain`/
+  `status`/`parts` fields; per the BUILD INSTRUCTION's "no invented
+  numbers, ever" rule, all 8 real cases got `gold: null, status: "needs
+  gold value"` in this task -- none has ever had its true answer
+  verified against real data (see Open items: the pull still hasn't
+  loaded any rows), so inventing one now would be exactly the kind of
+  fabrication this whole codebase's citation-checker/no-fake-numbers
+  discipline exists to prevent. `area evals` gained `--from-traces`
+  (`area.evals.runner.score_from_traces`) to re-score already-written
+  trace files under the new rule with no agent-loop/model/database call
+  at all -- used to regenerate the committed `evals/summary.json`, which
+  now honestly reports **0 passed, 8 not scored** instead of the old,
+  meaningless "8/8 passed."
+
+  Read-only per this task's own instruction, and unchanged: the agent
+  loop's `accepted` field (`src/area/agent/loop.py`, `citation_checker`'s
+  own verification logic (`src/area/tools/citation_checker.py`). Nothing
+  about how an answer gets verified as cited changed -- only how a
+  verified-but-possibly-abstaining answer gets scored against a known
+  correct value.
+
+  Also this session: reconciled `README.md`'s "What's built"/"Not yet
+  built" sections with the actual tree (the agent loop, web app, and
+  causal estimator were already built and previously mis-listed as "not
+  yet built" there) and its stale "128/128 tests" claim (see this
+  session's own pytest run in README.md and its "Full-repo test status"
+  line) -- task A1 part 2.
+
+## Open items (blocked on the owner)
 
 - **The D17 real streaming pull crashed before loading any rows, and
   is not currently running (2026-09-16, this session).** Root cause:
@@ -315,7 +365,7 @@ It has NOT been run yet — see Open items below.
   Workloads") -- almost certainly because the task briefing described
   an existing detached pull job this session was told never to
   restart, and the policy can't tell that job already died on its own
-  before this session touched it. **Needs Leon (or a session with
+  before this session touched it. **Needs the owner (or a session with
   permission to start it) to run**
   `area pull --stream --s3-bucket giggit-area-raw-payments` (add
   `--database-url`, or rely on `$DATABASE_URL`) **for real** --
@@ -326,7 +376,7 @@ It has NOT been run yet — see Open items below.
   can only run from a machine with real network access to
   `openpaymentsdata.cms.gov` / `download.cms.gov` (this build
   environment's sandboxes are both blocked — see "Network egress"
-  above), so realistically that means Leon's own Mac, for multiple
+  above), so realistically that means the owner's own Mac, for multiple
   hours, using real bandwidth and disk space (peaking at ~9.2 GB for the
   largest single year's raw CSV in flight, streamed and never fully
   buffered). Not blocked on a decision anymore — blocked on reaching
@@ -828,7 +878,7 @@ TESTED:
 - `vercel build` (from `web/`, Vercel CLI 59.11.7, local, real): **build
   succeeded** ("Build Completed in .vercel/output"). Not deployed.
 
-**Real finding, flagged for Leon**: running `vercel build` for the first
+**Real finding, flagged for the owner**: running `vercel build` for the first
 time in this directory auto-created a *project link* to an existing
 Vercel project named plain "web" under the `giggit` team scope
 (`orgId team_VMW68eILolqlTRHeHfb9t7ZU`), and downloaded that project's
@@ -963,3 +1013,125 @@ the D17 pull actually completing and loading a year (raw/DB, either
 path works for this module since it reads raw files, not Neon).
 
 NEXT: `data/facts.md` update, then this session's close-out report.
+
+### TASK: A1 (part 1 + part 2) — 2026-09-17
+
+TASK: A1 part 1 -- rescore `area evals` so a question with a known
+correct value fails when the agent abstains, instead of the old rule
+("no loop error and nothing uncited" -- an abstention always satisfies
+that) reporting a pass; part 2 -- reconcile `README.md`'s "What's
+built"/"Not yet built" and test-count claims with the actual tree.
+
+STATUS: Done, both parts.
+
+BUILT (part 1) -- see D20 above for the full design rationale:
+- `src/area/evals/scoring.py` (new) -- `is_abstention`/
+  `ABSTENTION_PHRASES` (one explicit phrase list, one place),
+  `score_correct`, `score_complete`, `find_executed_sql`/
+  `score_retrieval_ok`, and `score_case` (the four scores plus the
+  combined `passed` rule, in three-valued/Kleene logic so an unscoreable
+  case reports `None`, never `True`).
+- `src/area/evals/cases.py` -- `EvalCase` gained `gold`/`expect_abstain`/
+  `status`/`parts`. All 8 real cases: `gold=None,
+  status="needs gold value"` (no invented numbers); `food-beverage-share`/
+  `semaglutide-vs-tirzepatide`/`novo-lilly-share` also got `parts` (the
+  named categories/products/manufacturers the question itself names, so
+  `complete` has something to check even before `gold` is known).
+- `src/area/evals/runner.py` -- `run_evals` now scores every case via
+  `scoring.score_case` and carries the four scores plus `gold`/
+  `expect_abstain`/`status` on `EvalCaseResult`; gained a `tools=`
+  passthrough (mirrors `run_agent`'s own parameter) purely for testing
+  with a fake registry. New `score_from_traces()` re-scores already-
+  written trace files with no agent-loop/model/database call.
+  `EvalsSummary` gained `failed`/`not_scored` counts alongside the
+  existing `passed`.
+- `src/area/cli.py` -- `area evals` gained `--from-traces`; per-case
+  print line now distinguishes PASS/FAIL/NOT SCORED.
+- Explicitly NOT touched, per this task's own instruction:
+  `src/area/agent/loop.py` (where `accepted` is set) and
+  `src/area/tools/citation_checker.py`.
+- `tests/test_evals_scoring.py` (new, 28 tests, all offline/mocked
+  traces -- no database): unit tests for every scoring function, the 4
+  scenarios this task named explicitly (abstention-vs-gold fails,
+  abstention-vs-expect_abstain passes, gold-null is never scored true,
+  correct-and-retrieved passes), an end-to-end `run_evals` run with a
+  `ScriptedProvider` + fake `query_tool` (same pattern as
+  `tests/test_agent_loop.py`), `score_from_traces` reading trace files
+  off disk (including a regression check against the real committed
+  `evals/traces/` -- asserts 0 passed / 8 not scored), and a CLI test
+  that `--from-traces` never calls `run_evals`.
+- Regenerated `evals/summary.json` for real: `area evals --from-traces`
+  (no database, no model call) against the 8 real committed traces under
+  `evals/traces/`. Result: **0 passed, 0 failed, 8 not scored** -- every
+  case still has `gold: null`, and `abstained` is `True` for all 8 (the
+  real answers already on disk), matching this task's own predicted
+  outcome exactly.
+
+BUILT (part 2):
+- `README.md` -- replaced the two task-dated "What's built (W-B1)"/
+  "(W-B2)" sections with one "What's built" section organized by area
+  (data layer, tools, forecast, causal, agent loop, evals, providers,
+  CLI, web), each line naming the actual module and what it does,
+  verified by reading it for this pass -- not carried over from old task
+  reports. Rewrote "Not yet built" (the old copy still named the agent
+  loop, evals, the web app, and the causal estimator as unbuilt -- all
+  four exist and are described in "What's built" now); it now names only
+  what's actually still missing: the real CMS pull loading rows, the
+  `vercel deploy`, and verified `gold` values for the 8 eval questions.
+  Updated the stale "128/128 tests" claim to this session's own
+  `pytest -q` run. Added a new "Evals status" section stating plainly
+  that the regenerated summary predates the real data load and counts as
+  not passed.
+- `CONTEXT.md` (this file) -- D20 (above) and this report.
+- Also fixed, while editing these two files for the reasons above: every
+  banned personal-name reference `scripts/hygiene.sh` checks for, in
+  `README.md`/`CONTEXT.md` -- replaced with "the owner" throughout.
+  Pre-existing text, not introduced by this task, fixed because it was
+  in files this task was already rewriting. One instance remains, in a
+  code comment in a file this task was explicitly told not to modify;
+  see TESTED below for what that means for hygiene.
+
+TESTED:
+- `uv run ruff check .`: clean.
+- `uv run pytest -q`: **173 passed, 11 skipped** (up from 145 passed, 11
+  skipped before this task's own tests were added -- the 11 skips are
+  the same real-Postgres-only tests as always, `TEST_DATABASE_URL` unset
+  in this environment).
+- `scripts/hygiene.sh`: **does not print HYGIENE OK**, for two reasons
+  that predate this task and this branch, neither touched by this task's
+  diff:
+  1. `src/area/tools/citation_checker.py:9` names the owner's personal
+     name in a comment -- this task was explicitly told not to modify
+     that file.
+  2. `git log` on `main` already carries two hygiene-banned strings from
+     before this task started: one existing commit's subject line names
+     the owner's personal name (D11's own decision-log commit), and
+     another existing commit's body names a model family (from D18's own
+     real finding, not an attribution line). Fixing either means
+     rewriting shared `main` history, which this task did not do --
+     that's a destructive operation on a branch other sessions/the
+     owner may also be working from, well outside "score evals
+     correctly and reconcile a README."
+  Every string this task's own diff added was checked against the same
+  banned list by hand; hygiene fails only on the two pre-existing items
+  above, not on anything added here.
+
+OPEN -- for the owner:
+1. Same as every prior task's own report: the real CMS pull still hasn't
+   loaded a row (Open items, above) -- `evals/summary.json`'s "8 not
+   scored" is a direct, honest consequence of that, not a scoring bug.
+   Once rows load, run `area tools-test`/`area facts.md` by hand, write
+   verified `value`/`unit`/`tolerance`/`expected_table`/`expected_columns`
+   into each case's `gold` in `src/area/evals/cases.py`, and re-run `area
+   evals` (or `--from-traces` against fresh traces) to get a real
+   passed/failed count for the first time.
+2. The two pre-existing hygiene items above (`citation_checker.py`'s
+   comment; the two flagged commits already on `main`) -- flagging for a
+   decision on whether either is worth a dedicated, separate fix (a
+   one-line comment edit for the first; a history rewrite, only if the
+   owner explicitly wants one and understands it changes commit hashes
+   on `main`, for the second). Not fixed here, by this task's own
+   constraints.
+
+NEXT: fill in real `gold` values once the pull loads rows (Open item 1
+above); nothing else queued from this task.
