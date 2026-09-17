@@ -6,7 +6,7 @@ module's verdict; this module only decides, per number, pass or fail.
 
 Design notes (disclosed judgment call -- the spec sketches the mechanism
 in sections 4.4 and 5.3 but doesn't fully pin down the wire format; see
-CONTEXT.md decision D12 for the summary Leon/Fable should review):
+CONTEXT.md decision D12 for the summary the owner should review):
 
 - The composer is expected to write inline citation markers immediately
   after a number, e.g. "$1,234.56 [q_ab12cd34]" or "24.7% [d_share1]".
