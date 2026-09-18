@@ -172,6 +172,15 @@ def _build_parser() -> argparse.ArgumentParser:
     causal_p.add_argument("--year", type=int, action="append", dest="years")
     causal_p.add_argument("--manufacturer", action="append", dest="manufacturers")
 
+    canary_p = sub.add_parser(
+        "canary",
+        help="Live Eval canary: call the deployed endpoint, score against real-time "
+        "gold SQL, print one ledger record (giggitai.com Live Eval tab)",
+    )
+    canary_p.add_argument("--rows-path", default=None)
+    canary_p.add_argument("--database-url", default=None)
+    canary_p.add_argument("--endpoint", default=None)
+
     for name, task in sorted(NOT_YET_BUILT.items()):
         sub.add_parser(name, help=f"(not built yet -- see SPEC-area.md task {task})")
 
@@ -537,6 +546,23 @@ def _run_causal(args: argparse.Namespace) -> int:
     return 0
 
 
+def _run_canary(args: argparse.Namespace) -> int:
+    """`area canary`: the Live Eval canary (see the README's "Live Eval
+    canary" section and src/area/canary.py's own module docstring).
+    Prints one JSON ledger record to stdout and exits 0 only when the
+    observed correct-count matches the recorded definition."""
+    from area.canary import ROWS_PATH, run_canary
+
+    rows_path = Path(args.rows_path) if args.rows_path else ROWS_PATH
+    record = run_canary(
+        rows_path=rows_path,
+        database_url=args.database_url,
+        endpoint=args.endpoint,
+    )
+    print(json.dumps(record))
+    return 0 if record["match"] else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -564,6 +590,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_evals(args)
     if args.command == "causal":
         return _run_causal(args)
+    if args.command == "canary":
+        return _run_canary(args)
 
     parser.error(f"unknown command: {args.command}")
     return 2  # pragma: no cover -- parser.error() already exits

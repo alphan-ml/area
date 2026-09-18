@@ -219,3 +219,66 @@ passed** — it is not evidence the agent works, only that it fails safely
 with no data. The old summary this replaced reported "8/8 passed" under
 a rule that only checked for citation-clean text, which is exactly the
 gap this task closed.
+
+## Live Eval canary
+
+giggitai.com's Live Eval tab is a public ledger of scheduled evaluation
+runs against systems' live endpoints, replayed on the site as a
+terminal. `canary/canary.workflow.yml.txt` is this repo's contribution
+to that: once moved to `.github/workflows/canary.yml` (see that file's
+own note on why it isn't there yet), it runs `area canary`
+(`src/area/canary.py`) on a schedule (`17 */6 * * *`, every 6 hours) and
+on demand (`workflow_dispatch`).
+
+What it does, each run:
+
+- Reads the 8 fixed questions in `canary/rows.json`. These are the same
+  8 questions as `src/area/evals/cases.py`'s question set — the
+  gold-blind set written before any real data was loaded and never used
+  to prompt-engineer `web/api/ask.js`'s SQL-writing model call, so it is
+  this system's held-out eval split. `tests/test_canary.py` proves the
+  two id sets match exactly.
+- For each question, runs that row's own committed gold SQL against the
+  real, currently-loaded database (`DATABASE_URL`) to get the real gold
+  number(s) **at run time** — never a stored or guessed number.
+- Calls the live endpoint, `POST https://giggitai.com/api/area-ask`,
+  with the same question text.
+- Scores the answer: a row is `correct` if every number the answer
+  states is within 0.5% of one of that row's gold numbers, and the
+  citation check passed (`accepted: true`, `unverified: []`). A row
+  whose gold SQL finds no data (its years aren't loaded yet) is instead
+  `correct` if the agent honestly abstains — an abstention always counts
+  as correct for that row.
+- Prints one JSON record — `ts`, `release` (short git sha of `main`),
+  `metric: "correct"`, `recorded`, `observed`, `tolerance`, `match`,
+  `p50_ms`/`p95_ms`, `errors`, `duration_s`, up to 8 terminal `lines`,
+  and an `extra.rows` breakdown of `cited`/`retrieval_ok`/`abstained`/
+  `latency_ms` per question — then appends it to `ledger/runs.jsonl` and
+  overwrites `ledger/latest.json` on this repo's own orphan `ledger`
+  branch (created empty the first time this workflow runs). Every commit
+  to that branch is authored and committed as
+  `Alpha N <45754668+alphan-ml@users.noreply.github.com>`.
+
+Where the ledger is: the `ledger` branch of this repo —
+`ledger/latest.json` (the most recent run) and `ledger/runs.jsonl` (one
+JSON object per line, oldest first). giggitai.com reads both files
+straight from `raw.githubusercontent.com`.
+
+**`recorded` is a definition, not a measured value.** All 8 canary
+questions are specified to be answerable, or correctly abstainable,
+every time — so 8 out of 8 is the passing bar the system is held to, not
+a number read back from a training run. The metric's own `tolerance` is
+0: `match` is only `true` when `observed` is exactly 8. (A separate,
+per-number tolerance of 0.5% is what decides whether one answer's stated
+number matches that row's gold number — see above.)
+
+How to read `match`: `true` means the live endpoint answered every one
+of the 8 canary questions correctly (or correctly abstained) against the
+real database, right now. `false` means at least one row was wrong,
+uncited, or errored — check that run's `extra.rows` and `lines` for
+which one and why. An endpoint or database error is always recorded as
+an error for that row, never papered over with a fallback number.
+
+Run it by hand: `area canary` (reads `DATABASE_URL` from the
+environment, calls the live endpoint, prints the record to stdout, and
+exits 0 only when `match` is `true`).

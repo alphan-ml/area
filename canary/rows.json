@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "system": "area",
+  "endpoint": "https://giggitai.com/api/area-ask",
+  "facts_endpoint": "https://giggitai.com/api/area-facts",
+  "metric": "correct",
+  "recorded": 8,
+  "tolerance": 0,
+  "number_tolerance": 0.005,
+  "note": "recorded is a definition, not a measured value: all 8 rows are specified to be answerable-or-abstainable correctly. See README's Live Eval canary section. Rows are area.evals.cases.CASES' 8 fixed questions -- the held-out set written before any real data was loaded and never used to prompt-engineer web/api/ask.js's SQL-writing model call (tests/test_canary.py proves every id below is one of those case ids).",
+  "rows": [
+    {
+      "id": "total-dollars",
+      "question": "What was the total dollar amount of GLP-1 manufacturer payments in the data, across all program years loaded so far?",
+      "gold_sql": "SELECT SUM(amount_usd) AS total_usd FROM payments",
+      "expected_columns": ["amount_usd"]
+    },
+    {
+      "id": "top-specialty",
+      "question": "Which physician specialty received the most GLP-1 manufacturer payment dollars?",
+      "gold_sql": "SELECT physician_specialty, SUM(amount_usd) AS total_usd FROM payments WHERE physician_specialty IS NOT NULL GROUP BY physician_specialty ORDER BY total_usd DESC LIMIT 1",
+      "expected_columns": ["physician_specialty"]
+    },
+    {
+      "id": "top-state",
+      "question": "Which US state had physicians receiving the most GLP-1 manufacturer payment dollars?",
+      "gold_sql": "SELECT physician_state, SUM(amount_usd) AS total_usd FROM payments WHERE physician_state IS NOT NULL GROUP BY physician_state ORDER BY total_usd DESC LIMIT 1",
+      "expected_columns": ["physician_state"]
+    },
+    {
+      "id": "quarterly-2021-q1",
+      "question": "What were total GLP-1 manufacturer payment dollars in the first quarter of 2021?",
+      "gold_sql": "SELECT SUM(amount_usd) AS total_usd FROM payments WHERE quarter = '2021Q1'",
+      "expected_columns": ["quarter"]
+    },
+    {
+      "id": "food-beverage-share",
+      "question": "What share of GLP-1 manufacturer payment dollars were categorized as Food and Beverage?",
+      "gold_sql": "SELECT ROUND(100.0 * SUM(amount_usd) FILTER (WHERE nature_of_payment = 'Food and Beverage') / NULLIF(SUM(amount_usd), 0), 2) AS pct FROM payments",
+      "expected_columns": ["nature_of_payment"]
+    },
+    {
+      "id": "semaglutide-vs-tirzepatide",
+      "question": "How do total payment dollars for semaglutide products compare to tirzepatide products?",
+      "gold_sql": "SELECT product_generic, SUM(amount_usd) AS total_usd FROM payments WHERE product_generic IN ('semaglutide', 'tirzepatide') GROUP BY product_generic",
+      "expected_columns": ["product_generic"]
+    },
+    {
+      "id": "novo-lilly-share",
+      "question": "What percentage of matched GLP-1 payment dollars went to manufacturers other than Novo Nordisk and Eli Lilly?",
+      "gold_sql": "SELECT ROUND(100.0 * SUM(amount_usd) FILTER (WHERE manufacturer NOT ILIKE '%Novo Nordisk%' AND manufacturer NOT ILIKE '%Eli Lilly%') / NULLIF(SUM(amount_usd), 0), 2) AS pct FROM payments",
+      "expected_columns": ["manufacturer"]
+    },
+    {
+      "id": "row-count-2021",
+      "question": "How many individual GLP-1 manufacturer payment records are in the data for program year 2021?",
+      "gold_sql": "SELECT COUNT(*) AS row_count FROM payments WHERE program_year = 2021",
+      "expected_columns": ["program_year"]
+    }
+  ]
+}
