@@ -62,14 +62,19 @@ ABSTENTION_PHRASES: tuple[str, ...] = (
     "not available yet",
 )
 
-_NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
+# A digit glued to a letter or hyphen (the 1 in GLP-1, the 1 in Q1) is part of a name,
+# not a stated number; years stand alone and are dropped below.
+_NUMBER_RE = re.compile(r"(?<![A-Za-z0-9-])-?\d[\d,]*(?:\.\d+)?")
 
 
 def _extract_numbers(text: str | None) -> list[float]:
     out: list[float] = []
     for raw in _NUMBER_RE.findall(text or ""):
+        bare = raw.replace(",", "")
+        if bare.lstrip("-").isdigit() and len(bare.lstrip("-")) == 4 and 1900 <= int(bare) <= 2099:
+            continue  # a bare year, not a claim
         try:
-            out.append(float(raw.replace(",", "")))
+            out.append(float(bare))
         except ValueError:
             continue
     return out
