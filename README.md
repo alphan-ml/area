@@ -241,7 +241,7 @@ What it does, each run:
 - For each question, runs that row's own committed gold SQL against the
   real, currently-loaded database (`DATABASE_URL`) to get the real gold
   number(s) **at run time** — never a stored or guessed number.
-- Calls the live endpoint, `POST https://giggitai.com/api/area-ask`,
+- Calls the live endpoint, `POST https://www.giggitai.com/api/area-ask`,
   with the same question text.
 - Scores the answer: a row is `correct` if every number the answer
   states is within 0.5% of one of that row's gold numbers, and the
