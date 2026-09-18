@@ -1,7 +1,7 @@
 {
   "version": 1,
   "system": "area",
-  "endpoint": "https://giggitai.com/api/area-ask",
+  "endpoint": "https://www.giggitai.com/api/area-ask",
   "facts_endpoint": "https://giggitai.com/api/area-facts",
   "metric": "correct",
   "recorded": 8,
