@@ -34,6 +34,10 @@ q_totals(quarter, product, manufacturer, total_usd, payment_count)
 q_by_specialty(quarter, physician_specialty, total_usd, payment_count)
 q_by_state(quarter, physician_state, total_usd, payment_count)
 
+Column formats and matching rules (read carefully -- wrong assumptions here cause query errors or wrong answers):
+- quarter is TEXT in the form 'YYYYQ#', e.g. '2021Q1' for the first quarter of 2021. It is never an integer. To filter on a specific quarter, use quarter = '2021Q1', not quarter = 1.
+- physician_specialty, manufacturer, physician_state, product, product_generic and nature_of_payment are free-text columns copied from the source data and may include suffixes, punctuation or casing you would not guess (e.g. a manufacturer name may be "Novo Nordisk Inc." rather than "Novo Nordisk"). For any filter on one of these columns, use case-insensitive partial matching, e.g. manufacturer ILIKE '%novo nordisk%', never manufacturer = 'Novo Nordisk' or manufacturer IN (...) with exact names. This applies to NOT-matching filters too: manufacturer NOT ILIKE '%novo nordisk%' AND manufacturer NOT ILIKE '%eli lilly%'.
+
 Write exactly one SELECT statement, no semicolons, no other tables. Include a LIMIT (<= 5000).`;
 
 function sqlPrompt(question) {

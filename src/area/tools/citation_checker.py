@@ -188,10 +188,19 @@ def _iter_numeric_leaves(payload: Any):
 
 
 def _find_in_evidence(claimed: float, claimed_raw: str, evidence: Evidence) -> bool:
-    return any(
-        _numbers_close(claimed, candidate, claimed_raw)
-        for candidate in _iter_numeric_leaves(evidence.payload)
-    )
+    """A stated percentage is often derived from a raw 0-1 fraction the SQL
+    returned as-is (e.g. a column named "..._share" holding 0.3405) -- the
+    composer is expected to multiply by 100 for a readable answer (F1
+    diagnosis, 2026-09-27: a correct 34.05% answer was being rejected
+    because the evidence held 0.3405, not 34.05). When the claimed number
+    is a percentage, also accept a leaf scaled by 100 either way, since
+    some generated SQL already multiplies by 100 and some does not."""
+    is_percent = claimed_raw.rstrip().endswith("%")
+    for candidate in _iter_numeric_leaves(evidence.payload):
+        scaled = (candidate, candidate * 100, candidate / 100) if is_percent else (candidate,)
+        if any(_numbers_close(claimed, s, claimed_raw) for s in scaled):
+            return True
+    return False
 
 
 def check(
@@ -205,12 +214,14 @@ def check(
     evidence_by_id = {e.evidence_id: e for e in evidence}
     derivations_by_id = {d.derivation_id: d for d in derivations}
 
-    marker_spans = [m.span() for m in _MARKER_SPAN_PATTERN.finditer(answer_text)]
+    all_markers = [
+        (m.start(), m.end(), m.group(1)) for m in re.finditer(r"\[([A-Za-z0-9_\-]+)\]", answer_text)
+    ]
 
     def _inside_a_marker(pos: int) -> bool:
-        return any(start <= pos < end for start, end in marker_spans)
+        return any(start <= pos < end for start, end, _ in all_markers)
 
-    verdicts: list[NumberVerdict] = []
+    numbers: list[tuple[str, float, int, int]] = []  # raw, claimed, start, end
     for match in _NUMBER_PATTERN.finditer(answer_text):
         if _inside_a_marker(match.start()):
             continue  # a digit inside "[q_ab12cd34]" is part of the id, not a claimed number
@@ -221,9 +232,42 @@ def check(
             claimed = _parse_number(raw)
         except ValueError:
             continue
+        numbers.append((raw, claimed, match.start(), match.end()))
 
-        marker_match = _MARKER_PATTERN.match(answer_text, match.end())
-        cited_id = marker_match.group(1) if marker_match else None
+    # Pass 1: immediate adjacency (marker right after the number).
+    number_marker_id: dict[int, str] = {}
+    claimed_marker_starts: set[int] = set()
+    for i, (_raw, _claimed, _start, end) in enumerate(numbers):
+        marker_match = _MARKER_PATTERN.match(answer_text, end)
+        if not marker_match:
+            continue
+        number_marker_id[i] = marker_match.group(1)
+        claimed_marker_starts.add(marker_match.start())
+
+    # Pass 2 (F1 diagnosis, 2026-09-27): a composer does not always place
+    # the marker immediately after a number -- a one-clause percentage
+    # sentence ("24.7% of X went to Y [q_web].") often gets one marker at
+    # the end of the sentence instead. An unclaimed marker is attributed
+    # to the single unclaimed number before it (since the previous
+    # unclaimed marker, or the start of the text); 0 or 2+ candidates are
+    # left ambiguous and not guessed, same conservative default as before.
+    boundary = 0
+    for marker_start, marker_end, marker_id in all_markers:
+        if marker_start in claimed_marker_starts:
+            boundary = marker_end
+            continue
+        candidates = [
+            i
+            for i, (_raw, _claimed, n_start, n_end) in enumerate(numbers)
+            if i not in number_marker_id and n_start >= boundary and n_end <= marker_start
+        ]
+        if len(candidates) == 1:
+            number_marker_id[candidates[0]] = marker_id
+        boundary = marker_end
+
+    verdicts: list[NumberVerdict] = []
+    for i, (raw, claimed, _start, _end) in enumerate(numbers):
+        cited_id = number_marker_id.get(i)
 
         if cited_id is None:
             verdicts.append(
