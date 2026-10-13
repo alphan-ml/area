@@ -118,3 +118,45 @@ def test_number_immediately_after_a_word_is_still_caught_when_uncited():
     result = check("Model v2 reported total 42 with no citation.", [])
     assert result.accepted is False
     assert any(n.raw_text == "42" for n in result.numbers)
+
+
+def test_trailing_marker_matches_single_preceding_number_f1_2026_09_27():
+    # F1 diagnosis (2026-09-27): the live composer put one citation marker
+    # at the end of a one-clause percentage sentence instead of right
+    # after the number. A verified-correct number was being rejected as
+    # "unverified" purely because of marker placement.
+    evidence = [Evidence("q_web", "sql_rows", [{"food_beverage_share": "0.34045904745976102052"}])]
+    result = check(
+        "34.05% of GLP-1 manufacturer payment dollars were categorized as "
+        "Food and Beverage [q_web].",
+        evidence,
+    )
+    assert result.accepted is True, result.unverified
+    assert result.unverified == []
+
+
+def test_two_unclaimed_numbers_before_one_marker_stay_ambiguous():
+    # The trailing-marker fallback must not guess when it is ambiguous
+    # which of two numbers the one marker belongs to.
+    evidence = [Evidence("q_web", "sql_rows", [{"a": 10, "b": 20}])]
+    result = check("The values were 10 and 20, both from the same query [q_web].", evidence)
+    assert result.accepted is False
+    assert len(result.unverified) == 2
+
+
+def test_percent_answer_matches_a_raw_0_to_1_fraction_in_evidence():
+    # A SQL result column can hold the raw fraction (0.3405) while the
+    # composer states it as a readable percentage (34.05%) -- these are
+    # the same fact, just scaled. Same real case as the marker test above,
+    # isolated to the percent/fraction scaling rule itself.
+    evidence = [Evidence("q_1", "sql_rows", [{"share": 0.3405}])]
+    result = check("The share was 34.05% [q_1].", evidence)
+    assert result.accepted is True
+
+
+def test_percent_answer_still_matches_when_sql_already_multiplied_by_100():
+    # Some generated SQL already returns a 0-100 percentage rather than a
+    # 0-1 fraction -- the scaling rule must not break that existing case.
+    evidence = [Evidence("q_1", "sql_rows", [{"pct": 24.53}])]
+    result = check("24.53% of dollars went elsewhere [q_1].", evidence)
+    assert result.accepted is True
